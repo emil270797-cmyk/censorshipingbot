@@ -346,11 +346,14 @@ async def successful_payment_handler(m: Message):
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_messages(m: Message):
-    if not m.text:
+    # Игнорируем системные пересылки постов из канала
+    if not m.text or m.is_automatic_forward:
         return
         
     add_chat(m.chat.id)
     text = m.text
+    # ... дальше идет ваш старый код проверки на ссылки и мат ...
+
     
         # --- НОВЫЙ БЛОК: ПРОВЕРКА НА ССЫЛКИ (Только для Premium) ---
     if is_ai(m.chat.id):
@@ -388,13 +391,22 @@ async def handle_messages(m: Message):
 
 # --- ФУНКЦИЯ НАКАЗАНИЯ ---
 
+# --- ФУНКЦИЯ НАКАЗАНИЯ ---
+
 async def punish(m: Message, reason: str):
     try:
         await m.delete()
         record_stat(m.chat.id, 'delete')
         
-        warns = add_warn(m.from_user.id, m.chat.id)
-        user_name = m.from_user.first_name
+        # Проверяем, пишет ли человек от себя или от имени своего канала
+        if m.sender_chat:
+            user_id = m.sender_chat.id
+            user_name = f"Канал {m.sender_chat.title}"
+        else:
+            user_id = m.from_user.id
+            user_name = m.from_user.first_name
+            
+        warns = add_warn(user_id, m.chat.id)
         from aiogram.types import ChatPermissions
         
         if warns == 1:
@@ -402,21 +414,24 @@ async def punish(m: Message, reason: str):
             
         elif warns == 2:
             until = m.date + timedelta(minutes=5)
-            await bot.restrict_chat_member(
-                chat_id=m.chat.id, user_id=m.from_user.id, 
-                permissions=ChatPermissions(can_send_messages=False), until_date=until
-            )
+            # Если это обычный человек, даем мут
+            if not m.sender_chat:
+                await bot.restrict_chat_member(
+                    chat_id=m.chat.id, user_id=user_id, 
+                    permissions=ChatPermissions(can_send_messages=False), until_date=until
+                )
             record_stat(m.chat.id, 'mute')
             text = f"⚠️ <b>{user_name}</b>, второе предупреждение (2/3)! \nВы получаете мут на 5 минут."
             
         else:
             until = m.date + timedelta(hours=1)
-            await bot.restrict_chat_member(
-                chat_id=m.chat.id, user_id=m.from_user.id, 
-                permissions=ChatPermissions(can_send_messages=False), until_date=until
-            )
+            if not m.sender_chat:
+                await bot.restrict_chat_member(
+                    chat_id=m.chat.id, user_id=user_id, 
+                    permissions=ChatPermissions(can_send_messages=False), until_date=until
+                )
             record_stat(m.chat.id, 'mute')
-            reset_warns(m.from_user.id, m.chat.id)
+            reset_warns(user_id, m.chat.id)
             text = f"🛑 <b>{user_name}</b>, лимит исчерпан (3/3). \nВы получаете мут на 1 час."
 
         w = await m.answer(text, parse_mode="HTML")
@@ -425,6 +440,7 @@ async def punish(m: Message, reason: str):
         
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}")
+
 
 # --- ЗАПУСК БОТА ---
 from flask import Flask
