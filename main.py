@@ -195,6 +195,31 @@ async def cmd_start(m: Message):
             "Администраторы могут использовать <code>/buy_premium</code> для включения ИИ.",
             parse_mode="HTML"
         )
+# Команда для проверки статуса подписки
+@dp.message(Command("status"), F.chat.type.in_({"group", "supergroup"}))
+async def chat_status(m: Message):
+    # Достаем данные чата из базы
+    cursor.execute('SELECT ai_enabled, premium_until FROM chats_v2 WHERE chat_id = %s', (m.chat.id,))
+    res = cursor.fetchone()
+    
+    # Проверяем, есть ли запись, включен ли ИИ и не истекло ли время
+    if res and res[0] and res[1] > datetime.now().timestamp():
+        # Переводим сохраненные секунды в понятную дату
+        end_date = datetime.fromtimestamp(res[1]).strftime('%d.%m.%Y %H:%M')
+        await m.answer(
+            f"🌟 <b>Статус чата:</b> PREMIUM\n"
+            f"🧠 <b>Нейросеть (Gemini):</b> Активна\n"
+            f"⏳ <b>Оплачено до:</b> {end_date}",
+            parse_mode="HTML"
+        )
+    else:
+        await m.answer(
+            f"🌑 <b>Статус чата:</b> Базовый\n"
+            f"🤖 <b>Фильтр:</b> Стандартный словарный\n"
+            f"💡 Чтобы включить ИИ-модерацию, используйте /buy_premium",
+            parse_mode="HTML"
+        )
+
 # Команда статистики (только для админов)
 @dp.message(Command("stats"), F.chat.type.in_({"group", "supergroup"}))
 async def show_stats(m: Message):
