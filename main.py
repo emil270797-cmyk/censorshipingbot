@@ -3,6 +3,7 @@ import os
 import sqlite3
 import re
 import pymorphy3
+from datetime import timedelta
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, F
@@ -29,7 +30,11 @@ def keep_alive():
 # --- 2. БАЗА ДАННЫХ ---
 conn = sqlite3.connect('bot_database.db', check_same_thread=False)
 cursor = conn.cursor()
+
+# Таблица чатов
 cursor.execute('''CREATE TABLE IF NOT EXISTS chats (chat_id INTEGER PRIMARY KEY, ai_enabled BOOLEAN DEFAULT FALSE)''')
+# Таблица предупреждений (варнов)
+cursor.execute('''CREATE TABLE IF NOT EXISTS warns (user_id INTEGER, chat_id INTEGER, count INTEGER)''')
 conn.commit()
 
 def add_chat(chat_id):
@@ -44,6 +49,24 @@ def is_ai(chat_id):
     cursor.execute('SELECT ai_enabled FROM chats WHERE chat_id = ?', (chat_id,))
     res = cursor.fetchone()
     return bool(res and res[0])
+
+# Новые функции для работы с предупреждениями
+def add_warn(user_id, chat_id):
+    cursor.execute('SELECT count FROM warns WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
+    res = cursor.fetchone()
+    if res:
+        count = res[0] + 1
+        cursor.execute('UPDATE warns SET count = ? WHERE user_id = ? AND chat_id = ?', (count, user_id, chat_id))
+    else:
+        count = 1
+        cursor.execute('INSERT INTO warns (user_id, chat_id, count) VALUES (?, ?, ?)', (user_id, chat_id, count))
+    conn.commit()
+    return count
+
+def reset_warns(user_id, chat_id):
+    cursor.execute('DELETE FROM warns WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
+    conn.commit()
+
 
 # --- 3. НАСТРОЙКИ БОТА ---
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -145,12 +168,51 @@ async def moderate(m: Message):
 
 async def punish(m: Message, reason: str):
     try:
+        # 1. Удаляем плохое сообщение
         await m.delete()
-        w = await m.answer(f"🚫 Сообщение удалено {reason}.")
-        await asyncio.sleep(5)
+        
+        # 2. Добавляем предупреждение в базу
+        warns = add_warn(m.from_user.id, m.chat.id)
+        user_name = m.from_user.first_name
+        
+        # Импортируем права для мута
+        from aiogram.types import ChatPermissions
+        
+        # 3. Решаем, как наказывать
+        if warns == 1:
+            text = f"🚫 <b>{user_name}</b>, сообщение удалено ({reason}). \nЭто ваше первое предупреждение (1/3)."
+            
+        elif warns == 2:
+            until = m.date + timedelta(minutes=5)
+            await bot.restrict_chat_member(
+                chat_id=m.chat.id, 
+                user_id=m.from_user.id, 
+                permissions=ChatPermissions(can_send_messages=False),
+                until_date=until
+            )
+            text = f"⚠️ <b>{user_name}</b>, второе предупреждение (2/3)! \nВы получаете мут на 5 минут, чтобы остыть."
+            
+        else:
+            until = m.date + timedelta(hours=1)
+            await bot.restrict_chat_member(
+                chat_id=m.chat.id, 
+                user_id=m.from_user.id, 
+                permissions=ChatPermissions(can_send_messages=False),
+                until_date=until
+            )
+            reset_warns(m.from_user.id, m.chat.id) # Сбрасываем счетчик после мута
+            text = f"🛑 <b>{user_name}</b>, лимит исчерпан (3/3). \nВы получаете мут на 1 час."
+
+        # Отправляем уведомление в чат
+        w = await m.answer(text, parse_mode="HTML")
+        
+        # Удаляем уведомление бота через 10 секунд, чтобы не мусорить
+        await asyncio.sleep(10)
         await w.delete()
-    except:
-        pass
+        
+    except Exception as e:
+        print(f"Ошибка при выдаче наказания: {e}")
+
 
 async def main():
     keep_alive()
