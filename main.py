@@ -7,7 +7,7 @@ from datetime import timedelta
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram.types import Message, LabeledPrice, PreCheckoutQuery
 from aiogram.filters import Command
 from google import genai
 
