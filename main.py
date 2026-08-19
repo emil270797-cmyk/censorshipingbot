@@ -52,7 +52,7 @@ dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_KEY)
 
 # --- 4. ФИЛЬТРЫ ---
-BAD_WORDS = {"спам", "мат1", "мат2", "казино", "блять", "сука"}
+BAD_WORDS = {"спам", "мат1", "мат2", "казино", "блять", "сука", "хуй", "пиздец", "долбоеб"}
 
 def basic_filter(text):
     clean = text.lower()
@@ -90,7 +90,7 @@ async def moderate(m: Message):
         await punish(m, "базовым фильтром")
         return
 
-    if is_ai(m.chat.id) and len(text.split()) > 2:
+    if is_ai(m.chat.id):
         if await ai_filter(text):
             await punish(m, "AI-модератором")
 
