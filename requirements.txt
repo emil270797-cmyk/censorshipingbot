@@ -1,3 +1,4 @@
 aiogram
 google-genai
 flask
+pymorphy3
