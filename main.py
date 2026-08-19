@@ -282,20 +282,27 @@ async def handle_messages(m: Message):
     add_chat(m.chat.id)
     text = m.text
     
-    # --- НОВЫЙ БЛОК: ПРОВЕРКА НА ССЫЛКИ (Только для Premium) ---
+        # --- НОВЫЙ БЛОК: ПРОВЕРКА НА ССЫЛКИ (Только для Premium) ---
     if is_ai(m.chat.id):
         has_link = False
         # Telegram сам помечает ссылки в сообщениях через m.entities
         if m.entities:
             for entity in m.entities:
-                # url - обычные ссылки, text_link - слова со встроенной ссылкой
                 if entity.type in ["url", "text_link"]:
                     has_link = True
                     break
                     
         if has_link:
-            await punish(m, "Спам/Отправка ссылок")
-            return # Останавливаем код, чтобы не проверять дальше
+            # Получаем список всех администраторов чата
+            admins = await m.chat.get_administrators()
+            admin_ids = [admin.user.id for admin in admins]
+            
+            # Если отправителя нет в списке админов — выдаем наказание
+            if m.from_user.id not in admin_ids:
+                await punish(m, "Спам/Отправка ссылок")
+                return # Останавливаем код, чтобы не проверять дальше
+    # -----------------------------------------------------------
+
     # -----------------------------------------------------------
     
     # 1. Сначала проверяем базовым фильтром (быстро)
