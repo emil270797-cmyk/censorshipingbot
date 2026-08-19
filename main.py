@@ -220,6 +220,76 @@ async def chat_status(m: Message):
             parse_mode="HTML"
         )
 
+# --- УПРАВЛЕНИЕ НАКАЗАНИЯМИ (АМНИСТИЯ) ---
+
+# Команда /unwarn (Снять предупреждения)
+@dp.message(Command("unwarn"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_unwarn(m: Message):
+    # Проверка на администратора
+    admins = await m.chat.get_administrators()
+    if m.from_user.id not in [admin.user.id for admin in admins]:
+        await m.answer("❌ Эта команда доступна только администраторам.")
+        return
+
+    # Проверка, что команда отправлена реплаем (ответом) на сообщение
+    if not m.reply_to_message:
+        await m.answer("⚠️ Чтобы снять предупреждения, ответьте этой командой на сообщение пользователя.")
+        return
+
+    target_user = m.reply_to_message.from_user
+    
+    try:
+        # Сбрасываем счетчик варнов в базе (используем нашу готовую функцию)
+        reset_warns(target_user.id, m.chat.id)
+        await m.answer(f"✅ Предупреждения пользователя <b>{target_user.first_name}</b> обнулены.", parse_mode="HTML")
+    except Exception as e:
+        print(f"Ошибка при снятии варна: {e}")
+
+# Команда /unmute (Снять мут)
+@dp.message(Command("unmute"), F.chat.type.in_({"group", "supergroup"}))
+async def cmd_unmute(m: Message):
+    # Проверка на администратора
+    admins = await m.chat.get_administrators()
+    if m.from_user.id not in [admin.user.id for admin in admins]:
+        await m.answer("❌ Эта команда доступна только администраторам.")
+        return
+
+    # Проверка на реплай
+    if not m.reply_to_message:
+        await m.answer("⚠️ Чтобы снять мут, ответьте этой командой на сообщение пользователя.")
+        return
+
+    target_user = m.reply_to_message.from_user
+    from aiogram.types import ChatPermissions
+    
+    try:
+        # Возвращаем пользователю все базовые права на отправку сообщений и медиа
+        permissions = ChatPermissions(
+            can_send_messages=True,
+            can_send_audios=True,
+            can_send_documents=True,
+            can_send_photos=True,
+            can_send_videos=True,
+            can_send_video_notes=True,
+            can_send_voice_notes=True,
+            can_send_polls=True,
+            can_send_other_messages=True,
+            can_add_web_page_previews=True
+        )
+        await bot.restrict_chat_member(
+            chat_id=m.chat.id, 
+            user_id=target_user.id, 
+            permissions=permissions
+        )
+        
+        # Заодно обнуляем варны, чтобы он не улетел в мут при следующем же нарушении
+        reset_warns(target_user.id, m.chat.id)
+        
+        await m.answer(f"🔊 Мут снят! <b>{target_user.first_name}</b> снова может писать сообщения.", parse_mode="HTML")
+    except Exception as e:
+        await m.answer("❌ Не удалось снять мут. Возможно, этот пользователь не в муте, или у бота не хватает прав.")
+        print(f"Ошибка при снятии мута: {e}")
+
 # Команда статистики (только для админов)
 @dp.message(Command("stats"), F.chat.type.in_({"group", "supergroup"}))
 async def show_stats(m: Message):
