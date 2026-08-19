@@ -31,10 +31,10 @@ def keep_alive():
 conn = sqlite3.connect('bot_database.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# Таблица чатов
 cursor.execute('''CREATE TABLE IF NOT EXISTS chats (chat_id INTEGER PRIMARY KEY, ai_enabled BOOLEAN DEFAULT FALSE)''')
-# Таблица предупреждений (варнов)
 cursor.execute('''CREATE TABLE IF NOT EXISTS warns (user_id INTEGER, chat_id INTEGER, count INTEGER)''')
+# Новая таблица для статистики
+cursor.execute('''CREATE TABLE IF NOT EXISTS stats (chat_id INTEGER PRIMARY KEY, deleted_count INTEGER DEFAULT 0, mute_count INTEGER DEFAULT 0)''')
 conn.commit()
 
 def add_chat(chat_id):
@@ -50,7 +50,6 @@ def is_ai(chat_id):
     res = cursor.fetchone()
     return bool(res and res[0])
 
-# Новые функции для работы с предупреждениями
 def add_warn(user_id, chat_id):
     cursor.execute('SELECT count FROM warns WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
     res = cursor.fetchone()
@@ -66,6 +65,21 @@ def add_warn(user_id, chat_id):
 def reset_warns(user_id, chat_id):
     cursor.execute('DELETE FROM warns WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
     conn.commit()
+
+# Функции записи статистики
+def record_stat(chat_id, stat_type):
+    cursor.execute('INSERT OR IGNORE INTO stats (chat_id, deleted_count, mute_count) VALUES (?, 0, 0)', (chat_id,))
+    if stat_type == 'delete':
+        cursor.execute('UPDATE stats SET deleted_count = deleted_count + 1 WHERE chat_id = ?', (chat_id,))
+    elif stat_type == 'mute':
+        cursor.execute('UPDATE stats SET mute_count = mute_count + 1 WHERE chat_id = ?', (chat_id,))
+    conn.commit()
+
+def get_stats(chat_id):
+    cursor.execute('SELECT deleted_count, mute_count FROM stats WHERE chat_id = ?', (chat_id,))
+    res = cursor.fetchone()
+    return res if res else (0, 0)
+
 
 
 # --- 3. НАСТРОЙКИ БОТА ---
@@ -150,6 +164,24 @@ async def buy_prem(m: Message):
     set_ai(m.chat.id, True)
     await m.answer("✅ <b>Premium активирован!</b> ИИ запущен.", parse_mode="HTML")
 
+@dp.message(Command("stats"), F.chat.type.in_({"group", "supergroup"}))
+async def show_stats(m: Message):
+    # Проверяем, является ли пользователь администратором
+    admins = await m.chat.get_administrators()
+    if m.from_user.id not in [admin.user.id for admin in admins]:
+        await m.answer("❌ Эта команда доступна только администраторам чата.")
+        return
+
+    # Достаем данные из базы
+    d_count, m_count = get_stats(m.chat.id)
+    
+    text = (
+        f"📊 <b>Статистика модерации:</b>\n\n"
+        f"🗑 Удалено сообщений: <b>{d_count}</b>\n"
+        f"🤐 Выдано мутов: <b>{m_count}</b>"
+    )
+    await m.answer(text, parse_mode="HTML")
+
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def moderate(m: Message):
     text = m.text or m.caption
@@ -168,51 +200,41 @@ async def moderate(m: Message):
 
 async def punish(m: Message, reason: str):
     try:
-        # 1. Удаляем плохое сообщение
         await m.delete()
+        record_stat(m.chat.id, 'delete') # Увеличиваем счетчик удалений
         
-        # 2. Добавляем предупреждение в базу
         warns = add_warn(m.from_user.id, m.chat.id)
         user_name = m.from_user.first_name
-        
-        # Импортируем права для мута
         from aiogram.types import ChatPermissions
         
-        # 3. Решаем, как наказывать
         if warns == 1:
             text = f"🚫 <b>{user_name}</b>, сообщение удалено ({reason}). \nЭто ваше первое предупреждение (1/3)."
             
         elif warns == 2:
             until = m.date + timedelta(minutes=5)
             await bot.restrict_chat_member(
-                chat_id=m.chat.id, 
-                user_id=m.from_user.id, 
-                permissions=ChatPermissions(can_send_messages=False),
-                until_date=until
+                chat_id=m.chat.id, user_id=m.from_user.id, 
+                permissions=ChatPermissions(can_send_messages=False), until_date=until
             )
-            text = f"⚠️ <b>{user_name}</b>, второе предупреждение (2/3)! \nВы получаете мут на 5 минут, чтобы остыть."
+            record_stat(m.chat.id, 'mute') # Увеличиваем счетчик мутов
+            text = f"⚠️ <b>{user_name}</b>, второе предупреждение (2/3)! \nВы получаете мут на 5 минут."
             
         else:
             until = m.date + timedelta(hours=1)
             await bot.restrict_chat_member(
-                chat_id=m.chat.id, 
-                user_id=m.from_user.id, 
-                permissions=ChatPermissions(can_send_messages=False),
-                until_date=until
+                chat_id=m.chat.id, user_id=m.from_user.id, 
+                permissions=ChatPermissions(can_send_messages=False), until_date=until
             )
-            reset_warns(m.from_user.id, m.chat.id) # Сбрасываем счетчик после мута
+            record_stat(m.chat.id, 'mute') # Увеличиваем счетчик мутов
+            reset_warns(m.from_user.id, m.chat.id)
             text = f"🛑 <b>{user_name}</b>, лимит исчерпан (3/3). \nВы получаете мут на 1 час."
 
-        # Отправляем уведомление в чат
         w = await m.answer(text, parse_mode="HTML")
-        
-        # Удаляем уведомление бота через 10 секунд, чтобы не мусорить
         await asyncio.sleep(10)
         await w.delete()
         
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}")
-
 
 async def main():
     keep_alive()
