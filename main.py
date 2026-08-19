@@ -173,25 +173,15 @@ def basic_filter(text: str) -> bool:
 
 
 # --- 5. ЛОГИКА ТЕЛЕГРАМ-БОТА ---
-@dp.message(Command("start"))
-async def start(m: Message):
-    await m.answer("Привет! Добавь меня в группу и дай права удалять сообщения.\nКоманда /buy_premium включит ИИ.")
 
-@dp.message(Command("buy_premium"), F.chat.type.in_({"group", "supergroup"}))
-async def buy_prem(m: Message):
-    add_chat(m.chat.id)
-    set_ai(m.chat.id, True)
-    await m.answer("✅ <b>Premium активирован!</b> ИИ запущен.", parse_mode="HTML")
-
+# Команда статистики (только для админов)
 @dp.message(Command("stats"), F.chat.type.in_({"group", "supergroup"}))
 async def show_stats(m: Message):
-    # Проверяем, является ли пользователь администратором
     admins = await m.chat.get_administrators()
     if m.from_user.id not in [admin.user.id for admin in admins]:
         await m.answer("❌ Эта команда доступна только администраторам чата.")
         return
 
-    # Достаем данные из базы
     d_count, m_count = get_stats(m.chat.id)
     
     text = (
@@ -201,26 +191,68 @@ async def show_stats(m: Message):
     )
     await m.answer(text, parse_mode="HTML")
 
-@dp.message(F.chat.type.in_({"group", "supergroup"}))
-async def moderate(m: Message):
-    text = m.text or m.caption
-    if not text:
-        return
+# --- ОПЛАТА PREMIUM ЧЕРЕЗ TELEGRAM STARS ---
+
+# 1. Отправка счета (Инвойса)
+@dp.message(Command("buy_premium"), F.chat.type.in_({"group", "supergroup"}))
+async def send_invoice(m: Message):
+    prices = [LabeledPrice(label="Premium AI Модератор", amount=50)] 
     
+    await bot.send_invoice(
+        chat_id=m.chat.id,
+        title="Premium AI Модератор",
+        description="Включение нейросети Gemini для точного распознавания скрытой агрессии и завуалированного мата на 30 дней.",
+        payload="premium_activation",
+        provider_token="", # Оставляем пустым для Stars
+        currency="XTR",    # Валюта Telegram Stars
+        prices=prices
+    )
+
+# 2. Подтверждение перед оплатой
+@dp.pre_checkout_query()
+async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+# 3. Обработка успешного платежа и выдача прав
+@dp.message(F.successful_payment)
+async def successful_payment_handler(m: Message):
     add_chat(m.chat.id)
+    set_ai(m.chat.id, True, days=30) 
+    
+    stars = m.successful_payment.total_amount
+    await m.answer(
+        f"🎉 <b>Спасибо за поддержку!</b> Оплата в {stars} Stars получена.\n"
+        f"✅ <b>Premium активирован на 30 дней!</b> Нейросеть Gemini успешно подключена к этому чату.", 
+        parse_mode="HTML"
+    )
 
-    if basic_filter(text):
-        await punish(m, "базовым фильтром")
+# --- ГЛАВНЫЙ ОБРАБОТЧИК СООБЩЕНИЙ ---
+
+@dp.message(F.chat.type.in_({"group", "supergroup"}))
+async def handle_messages(m: Message):
+    if not m.text:
         return
-
+        
+    add_chat(m.chat.id)
+    text = m.text
+    
+    # 1. Сначала проверяем базовым фильтром (быстро)
+    if basic_filter(text):
+        await punish(m, "Мат/Запрещенное слово")
+        return
+        
+    # 2. Если базовый фильтр ничего не нашел, но включен ИИ - проверяем нейросетью (медленнее)
     if is_ai(m.chat.id):
-        if await ai_filter(text):
-            await punish(m, "AI-модератором")
+        is_bad = await ai_filter(text)
+        if is_bad:
+            await punish(m, "Токсичность/Скрытый мат (AI)")
+
+# --- ФУНКЦИЯ НАКАЗАНИЯ ---
 
 async def punish(m: Message, reason: str):
     try:
         await m.delete()
-        record_stat(m.chat.id, 'delete') # Увеличиваем счетчик удалений
+        record_stat(m.chat.id, 'delete')
         
         warns = add_warn(m.from_user.id, m.chat.id)
         user_name = m.from_user.first_name
@@ -235,7 +267,7 @@ async def punish(m: Message, reason: str):
                 chat_id=m.chat.id, user_id=m.from_user.id, 
                 permissions=ChatPermissions(can_send_messages=False), until_date=until
             )
-            record_stat(m.chat.id, 'mute') # Увеличиваем счетчик мутов
+            record_stat(m.chat.id, 'mute')
             text = f"⚠️ <b>{user_name}</b>, второе предупреждение (2/3)! \nВы получаете мут на 5 минут."
             
         else:
@@ -244,7 +276,7 @@ async def punish(m: Message, reason: str):
                 chat_id=m.chat.id, user_id=m.from_user.id, 
                 permissions=ChatPermissions(can_send_messages=False), until_date=until
             )
-            record_stat(m.chat.id, 'mute') # Увеличиваем счетчик мутов
+            record_stat(m.chat.id, 'mute')
             reset_warns(m.from_user.id, m.chat.id)
             text = f"🛑 <b>{user_name}</b>, лимит исчерпан (3/3). \nВы получаете мут на 1 час."
 
@@ -255,11 +287,12 @@ async def punish(m: Message, reason: str):
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}")
 
+# --- ЗАПУСК БОТА ---
+
 async def main():
-    keep_alive()
-    print("Бот запущен...")
-    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
+
