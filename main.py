@@ -282,12 +282,28 @@ async def handle_messages(m: Message):
     add_chat(m.chat.id)
     text = m.text
     
+    # --- НОВЫЙ БЛОК: ПРОВЕРКА НА ССЫЛКИ (Только для Premium) ---
+    if is_ai(m.chat.id):
+        has_link = False
+        # Telegram сам помечает ссылки в сообщениях через m.entities
+        if m.entities:
+            for entity in m.entities:
+                # url - обычные ссылки, text_link - слова со встроенной ссылкой
+                if entity.type in ["url", "text_link"]:
+                    has_link = True
+                    break
+                    
+        if has_link:
+            await punish(m, "Спам/Отправка ссылок")
+            return # Останавливаем код, чтобы не проверять дальше
+    # -----------------------------------------------------------
+    
     # 1. Сначала проверяем базовым фильтром (быстро)
     if basic_filter(text):
         await punish(m, "Мат/Запрещенное слово")
         return
         
-    # 2. Если базовый фильтр ничего не нашел, но включен ИИ - проверяем нейросетью (медленнее)
+    # 2. Если базовый фильтр ничего не нашел, но включен ИИ - проверяем нейросетью
     if is_ai(m.chat.id):
         is_bad = await ai_filter(text)
         if is_bad:
