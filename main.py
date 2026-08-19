@@ -53,27 +53,23 @@ dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_KEY)
 
 # --- 4. ФИЛЬТРЫ ---
-# Используем КОРНИ слов, чтобы перехватывать все склонения и формы!
 BAD_WORDS = {
-    "пизд",   # пизда, пиздец, запизделся, пиздатый...
-    "хуй",    # хуй, хуйня, охуел...
-    "хуе",    # хуевый, захуярить...
-    "хуя", 
-    "бля",    # блять, блядь, бляха...
-    "сук",    # сука, сучки, сучка...
-    "долбо",  # долбоеб, долбоебизм...
-    "еба",    # ебать, заебал...
-    "ёба", 
-    "ебн",    # ебнутый...
-    "пидор",  # пидор, пидорасы...
-    "казин",  # казино...
-    "спам"
+    "пизд", "хуй", "хуе", "хуя", "бля", "сук", 
+    "долбо", "еба", "ёба", "ебн", "пидор", "пидар", "пидр", 
+    "казин", "спам"
+}
+
+# Белый список: слова, которые содержат запрещенные корни, но матом не являются
+GOOD_WORDS = {
+    "оскорблять", "оскорбление", "оскорбляешь", "оскорбленный", "сабля", "корабля", 
+    "рубля", "грабля", "стебля", "колебание", "колебать", 
+    "барсук", "страхуй", "сукно"
 }
 
 def normalize_text(text: str) -> str:
     text = text.lower()
     
-    # Расширенная замена латинских букв, спецсимволов и цифр на кириллицу
+    # Замена латиницы, цифр и спецсимволов на кириллицу
     replacements = {
         'a': 'а', 'b': 'б', 'c': 'с', 'd': 'д', 'e': 'е', 
         'i': 'и', 'k': 'к', 'm': 'м', 'o': 'о', 'p': 'р', 
@@ -83,23 +79,46 @@ def normalize_text(text: str) -> str:
     for lat, cyr in replacements.items():
         text = text.replace(lat, cyr)
         
-    # Удаляем все символы, кроме букв и пробелов
+    # Оставляем только буквы и пробелы
     text = re.sub(r'[^а-яё\s]', '', text)
     
-    # Схлопываем повторяющиеся буквы (ппииизддддааа -> пизда)
+    # Схлопываем повторяющиеся буквы
     text = re.sub(r'(.)\1+', r'\1', text)
     
     return text
 
 def basic_filter(text: str) -> bool:
-    clean_text = normalize_text(text)
+    # 1. Разбиваем изначальный текст на отдельные слова
+    words = text.split()
     
-    for word in BAD_WORDS:
-        clean_word = normalize_text(word) 
-        if clean_word in clean_text:
-            return True
+    for original_word in words:
+        # 2. Нормализуем каждое слово по отдельности
+        clean_word = normalize_text(original_word)
+        
+        # Пропускаем пустые "слова" (например, если это были просто смайлики)
+        if not clean_word:
+            continue
             
+        # 3. Если слово есть в белом списке — это не мат, идем дальше
+        if clean_word in GOOD_WORDS:
+            continue
+            
+        # 4. Если слова нет в белом списке, проверяем его на плохие корни
+        for bad_root in BAD_WORDS:
+            if bad_root in clean_word:
+                return True
+                
     return False
+
+async def ai_filter(text: str) -> bool:
+    prompt = f"Ты модератор. Ответь ТОЛЬКО словом BAD (если есть мат, травля, скрытый спам) или OK (если чисто). Текст: '{text}'"
+    try:
+        res = await client.aio.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        return "BAD" in res.text.strip().upper()
+    except Exception as e:
+        print(f"Ошибка ИИ: {e}")
+        return False
+
 
 
 
