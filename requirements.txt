@@ -2,3 +2,4 @@ aiogram
 google-genai
 flask
 pymorphy3
+psycopg2-binary
