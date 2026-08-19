@@ -1,7 +1,7 @@
 import asyncio
 import os
-import sqlite3
 import re
+import psycopg2
 import pymorphy3
 from datetime import timedelta
 from threading import Thread
@@ -28,59 +28,78 @@ def keep_alive():
     t.start()
 
 # --- 2. БАЗА ДАННЫХ ---
-conn = sqlite3.connect('bot_database.db', check_same_thread=False)
+import psycopg2
+
+# Подключаемся к базе данных через URL из настроек Render
+DB_URL = os.environ.get("DATABASE_URL")
+
+# Открываем соединение (autocommit=True избавляет от необходимости писать conn.commit())
+conn = psycopg2.connect(DB_URL)
+conn.autocommit = True
 cursor = conn.cursor()
 
-cursor.execute('''CREATE TABLE IF NOT EXISTS chats (chat_id INTEGER PRIMARY KEY, ai_enabled BOOLEAN DEFAULT FALSE)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS warns (user_id INTEGER, chat_id INTEGER, count INTEGER)''')
-# Новая таблица для статистики
-cursor.execute('''CREATE TABLE IF NOT EXISTS stats (chat_id INTEGER PRIMARY KEY, deleted_count INTEGER DEFAULT 0, mute_count INTEGER DEFAULT 0)''')
-conn.commit()
+# Создаем таблицы (используем BIGINT, так как ID в Telegram очень длинные)
+cursor.execute('''CREATE TABLE IF NOT EXISTS chats_v2 (
+    chat_id BIGINT PRIMARY KEY, 
+    ai_enabled BOOLEAN DEFAULT FALSE,
+    premium_until DOUBLE PRECISION DEFAULT 0
+)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS warns (
+    user_id BIGINT, 
+    chat_id BIGINT, 
+    count INTEGER,
+    UNIQUE(user_id, chat_id)
+)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS stats (
+    chat_id BIGINT PRIMARY KEY, 
+    deleted_count INTEGER DEFAULT 0, 
+    mute_count INTEGER DEFAULT 0
+)''')
 
 def add_chat(chat_id):
-    cursor.execute('INSERT OR IGNORE INTO chats (chat_id, ai_enabled) VALUES (?, FALSE)', (chat_id,))
-    conn.commit()
+    # ON CONFLICT DO NOTHING - безопасное добавление (если чат уже есть, ошибка не выскочит)
+    cursor.execute('INSERT INTO chats_v2 (chat_id, ai_enabled, premium_until) VALUES (%s, FALSE, 0) ON CONFLICT (chat_id) DO NOTHING', (chat_id,))
 
-def set_ai(chat_id, status):
-    cursor.execute('UPDATE chats SET ai_enabled = ? WHERE chat_id = ?', (status, chat_id))
-    conn.commit()
+def set_ai(chat_id, status, days=30):
+    until = (datetime.now() + timedelta(days=days)).timestamp() if status else 0
+    cursor.execute('UPDATE chats_v2 SET ai_enabled = %s, premium_until = %s WHERE chat_id = %s', (status, until, chat_id))
 
 def is_ai(chat_id):
-    cursor.execute('SELECT ai_enabled FROM chats WHERE chat_id = ?', (chat_id,))
+    cursor.execute('SELECT ai_enabled, premium_until FROM chats_v2 WHERE chat_id = %s', (chat_id,))
     res = cursor.fetchone()
-    return bool(res and res[0])
+    if res and res[0]: 
+        if datetime.now().timestamp() < res[1]:
+            return True
+        else:
+            set_ai(chat_id, False)
+            return False
+    return False
 
 def add_warn(user_id, chat_id):
-    cursor.execute('SELECT count FROM warns WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
+    cursor.execute('SELECT count FROM warns WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
     res = cursor.fetchone()
     if res:
         count = res[0] + 1
-        cursor.execute('UPDATE warns SET count = ? WHERE user_id = ? AND chat_id = ?', (count, user_id, chat_id))
+        cursor.execute('UPDATE warns SET count = %s WHERE user_id = %s AND chat_id = %s', (count, user_id, chat_id))
     else:
         count = 1
-        cursor.execute('INSERT INTO warns (user_id, chat_id, count) VALUES (?, ?, ?)', (user_id, chat_id, count))
-    conn.commit()
+        cursor.execute('INSERT INTO warns (user_id, chat_id, count) VALUES (%s, %s, %s)', (user_id, chat_id, count))
     return count
 
 def reset_warns(user_id, chat_id):
-    cursor.execute('DELETE FROM warns WHERE user_id = ? AND chat_id = ?', (user_id, chat_id))
-    conn.commit()
+    cursor.execute('DELETE FROM warns WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
 
-# Функции записи статистики
 def record_stat(chat_id, stat_type):
-    cursor.execute('INSERT OR IGNORE INTO stats (chat_id, deleted_count, mute_count) VALUES (?, 0, 0)', (chat_id,))
+    cursor.execute('INSERT INTO stats (chat_id, deleted_count, mute_count) VALUES (%s, 0, 0) ON CONFLICT (chat_id) DO NOTHING', (chat_id,))
     if stat_type == 'delete':
-        cursor.execute('UPDATE stats SET deleted_count = deleted_count + 1 WHERE chat_id = ?', (chat_id,))
+        cursor.execute('UPDATE stats SET deleted_count = deleted_count + 1 WHERE chat_id = %s', (chat_id,))
     elif stat_type == 'mute':
-        cursor.execute('UPDATE stats SET mute_count = mute_count + 1 WHERE chat_id = ?', (chat_id,))
-    conn.commit()
+        cursor.execute('UPDATE stats SET mute_count = mute_count + 1 WHERE chat_id = %s', (chat_id,))
 
 def get_stats(chat_id):
-    cursor.execute('SELECT deleted_count, mute_count FROM stats WHERE chat_id = ?', (chat_id,))
+    cursor.execute('SELECT deleted_count, mute_count FROM stats WHERE chat_id = %s', (chat_id,))
     res = cursor.fetchone()
     return res if res else (0, 0)
-
-
 
 # --- 3. НАСТРОЙКИ БОТА ---
 TOKEN = os.environ.get("BOT_TOKEN")
