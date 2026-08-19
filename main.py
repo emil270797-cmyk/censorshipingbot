@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sqlite3
+import re
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, F
@@ -52,13 +53,47 @@ dp = Dispatcher()
 client = genai.Client(api_key=GEMINI_KEY)
 
 # --- 4. ФИЛЬТРЫ ---
-BAD_WORDS = {"спам", "мат1", "мат2", "казино", "блять", "сука", "хуй", "пиздец", "долбоеб"}
+# Расширяем базовый список
+BAD_WORDS = {"спам", "казино", "блять", "сука", "долбоеб", "хуй", "пиздец", "пидор"}
 
-def basic_filter(text):
-    clean = text.lower()
-    return any(word in clean for word in BAD_WORDS)
+def normalize_text(text: str) -> str:
+    text = text.lower()
+    
+    # 1. Замена латинских букв и цифр на кириллицу (защита от d0лб0eб, cyka)
+    replacements = {
+        'a': 'а', 'b': 'б', 'c': 'с', 'e': 'е', 'o': 'о', 'p': 'р', 
+        'x': 'х', 'y': 'у', '0': 'о', '@': 'а'
+    }
+    for lat, cyr in replacements.items():
+        text = text.replace(lat, cyr)
+        
+    # 2. Удаляем все спецсимволы (точки, запятые, слеши), оставляем только буквы и пробелы.
+    # Это превратит "д.о.л.б.о.е.б" в "д о л б о е б" или "сука!" в "сука"
+    text = re.sub(r'[^а-яё\s]', '', text)
+    
+    # 3. Схлопываем дубликаты букв (пппиииииииидддоорр -> пидор)
+    text = re.sub(r'(.)\1+', r'\1', text)
+    
+    return text
 
-async def ai_filter(text):
+def basic_filter(text: str) -> bool:
+    # Прогоняем текст сообщения через нормализатор
+    clean_text = normalize_text(text)
+    
+    # Ищем плохие слова
+    for word in BAD_WORDS:
+        # Нормализуем и само плохое слово на всякий случай
+        clean_word = normalize_text(word) 
+        
+        # Проверяем, есть ли корень плохого слова в сообщении
+        if clean_word in clean_text:
+            return True
+            
+    return False
+
+# Искусственный интеллект оставляем без изменений, 
+# но убираем проверку на длину > 2 слов, чтобы ИИ ловил даже одиночные завуалированные слова
+async def ai_filter(text: str) -> bool:
     prompt = f"Ты модератор. Ответь ТОЛЬКО словом BAD (если есть мат, травля, скрытый спам) или OK (если чисто). Текст: '{text}'"
     try:
         res = await client.aio.models.generate_content(model='gemini-2.5-flash', contents=prompt)
@@ -66,6 +101,7 @@ async def ai_filter(text):
     except Exception as e:
         print(f"Ошибка ИИ: {e}")
         return False
+
 
 # --- 5. ЛОГИКА ТЕЛЕГРАМ-БОТА ---
 @dp.message(Command("start"))
