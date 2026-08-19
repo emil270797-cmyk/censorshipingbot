@@ -288,11 +288,31 @@ async def punish(m: Message, reason: str):
         print(f"Ошибка при выдаче наказания: {e}")
 
 # --- ЗАПУСК БОТА ---
+from flask import Flask
+import os
+from threading import Thread
+
+# Создаем фейковый веб-сервер для Render
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Бот работает!"
+
+def run_web():
+    # Render сам выдает нужный порт через переменную окружения PORT
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 async def main():
+    # Запускаем веб-сервер в фоновом режиме (в отдельном потоке)
+    Thread(target=run_web).start()
+    
+    # Запускаем самого бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
+
 
