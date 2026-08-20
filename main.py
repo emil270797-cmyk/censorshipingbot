@@ -307,6 +307,41 @@ async def show_stats(m: Message):
     )
     await m.answer(text, parse_mode="HTML")
 
+# --- ПАНЕЛЬ ВЛАДЕЛЬЦА БОТА ---
+
+@dp.message(Command("botstats"))
+async def cmd_botstats(m: Message):
+    # ЗАМЕНИТЕ ЦИФРЫ НИЖЕ НА ВАШ СКОПИРОВАННЫЙ TELEGRAM ID!
+    OWNER_ID = 354584527 
+    
+    # Если команду пишет кто-то другой, бот просто промолчит
+    if m.from_user.id != OWNER_ID:
+        return
+        
+    try:
+        # Считаем общее количество чатов (базовые + премиум)
+        cursor.execute('SELECT COUNT(*) FROM chats_v2')
+        total_chats = cursor.fetchone()[0]
+        
+        # Считаем только чаты с активным Premium
+        current_time = datetime.now().timestamp()
+        cursor.execute('SELECT COUNT(*) FROM chats_v2 WHERE ai_enabled = TRUE AND premium_until > %s', (current_time,))
+        premium_chats = cursor.fetchone()[0]
+        
+        # Считаем базовые чаты (Математика: Всего - Премиум)
+        basic_chats = total_chats - premium_chats
+        
+        await m.answer(
+            f"📈 <b>Глобальная статистика проекта:</b>\n\n"
+            f"👥 Всего чатов с ботом: <b>{total_chats}</b>\n"
+            f"🌑 На базовом тарифе: <b>{basic_chats}</b>\n"
+            f"🌟 С активным Premium: <b>{premium_chats}</b>",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await m.answer(f"❌ Ошибка при получении статистики: {e}")
+
+
 # --- ОПЛАТА PREMIUM ЧЕРЕЗ TELEGRAM STARS ---
 
 # 1. Отправка счета (Инвойса)
