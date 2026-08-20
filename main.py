@@ -3,7 +3,7 @@ import os
 import re
 import psycopg2
 import pymorphy3
-from datetime import timedelta
+from datetime import timedelta, datetime
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, F
