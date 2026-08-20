@@ -341,6 +341,51 @@ async def cmd_botstats(m: Message):
     except Exception as e:
         await m.answer(f"❌ Ошибка при получении статистики: {e}")
 
+# Команда /chatlist (Показать список чатов)
+@dp.message(Command("chatlist"))
+async def cmd_chatlist(m: Message, bot: Bot):
+    # ЗАМЕНИТЕ НА ВАШ ID (тот же самый, что и в /botstats)
+    OWNER_ID = 354584527
+    
+    if m.from_user.id != OWNER_ID:
+        return
+
+    # Берем последние 30 чатов из базы, чтобы не упереться в лимиты Телеграма
+    cursor.execute('SELECT chat_id, ai_enabled, premium_until FROM chats_v2 LIMIT 30')
+    chats = cursor.fetchall()
+    
+    if not chats:
+        await m.answer("Список чатов пока пуст.")
+        return
+        
+    await m.answer("⏳ Собираю информацию о чатах, подождите...")
+    
+    text = "📋 <b>Список чатов с ботом:</b>\n\n"
+    current_time = datetime.now().timestamp()
+    
+    for chat_id, ai_enabled, premium_until in chats:
+        try:
+            # Спрашиваем у Телеграма название чата по его ID
+            chat_info = await bot.get_chat(chat_id)
+            chat_name = chat_info.title or "Без названия"
+            
+            # Определяем статус подписки
+            if ai_enabled and premium_until and premium_until > current_time:
+                status = "🌟 PREMIUM"
+            else:
+                status = "🌑 Базовый"
+                
+            text += f"🔹 <b>{chat_name}</b>\n└ Статус: {status}\n\n"
+        except Exception:
+            # Если бот был удален из чата, Телеграм выдаст ошибку, обрабатываем её
+            text += f"🔹 <i>Чат недоступен (ID: {chat_id})</i>\n└ Скорее всего, бота оттуда удалили\n\n"
+            
+    # Отправляем итоговый список
+    try:
+        await m.answer(text, parse_mode="HTML")
+    except Exception as e:
+        await m.answer(f"❌ Ошибка отправки списка (возможно, он слишком длинный): {e}")
+
 
 # --- ОПЛАТА PREMIUM ЧЕРЕЗ TELEGRAM STARS ---
 
