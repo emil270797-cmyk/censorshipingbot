@@ -389,10 +389,8 @@ async def handle_messages(m: Message):
         if is_bad:
             await punish(m, "Токсичность/Скрытый мат (AI)")
 
-# --- ФУНКЦИЯ НАКАЗАНИЯ ---
 
 # --- ФУНКЦИЯ НАКАЗАНИЯ ---
-
 async def punish(m: Message, reason: str):
     try:
         await m.delete()
@@ -440,6 +438,7 @@ async def punish(m: Message, reason: str):
         
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}")
+
 
 
 # --- ЗАПУСК БОТА ---
