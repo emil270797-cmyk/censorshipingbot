@@ -479,7 +479,7 @@ async def ai_filter(text: str) -> bool:
         
         # Прямая ссылка на сервер Google (самая быстрая модель 1.5-flash)
                 # Прямая ссылка на актуальную модель Gemini
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
+        model = genai.GenerativeModel("gemini-3.6-flash")
 
         
         # Упаковываем запрос и отключаем цензуру
