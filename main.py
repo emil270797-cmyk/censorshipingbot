@@ -110,7 +110,8 @@ dp = Dispatcher()
 # Правильная инициализация Gemini
 import google.generativeai as genai
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-pro')
+
 
 
 
@@ -460,6 +461,9 @@ async def successful_payment_handler(m: Message):
 # --- ФУНКЦИЯ ИИ-МОДЕРАЦИИ (Gemini) ---
 async def ai_filter(text: str) -> bool:
     try:
+        # Принудительно пишем в лог, что ИИ начал думать
+        print(f"🧠 ОТПРАВЛЯЮ В GEMINI: {text[:20]}...", flush=True)
+        
         prompt = (
             "Ты — строгий модератор публичного чата. Твоя задача — анализировать сообщения "
             "и находить в них нарушения. "
@@ -472,7 +476,6 @@ async def ai_filter(text: str) -> bool:
             f"Сообщение для проверки: {text}"
         )
         
-        # 🔴 ОТКЛЮЧАЕМ ВСТРОЕННЫЕ ФИЛЬТРЫ GOOGLE 🔴
         safety_settings = [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
             {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -480,16 +483,18 @@ async def ai_filter(text: str) -> bool:
             {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
         ]
         
-        # Отправляем запрос вместе с разрешением на опасный контент
         response = model.generate_content(prompt, safety_settings=safety_settings)
         result = response.text.strip().lower()
         
-        print(f"🤖 ОТВЕТ GEMINI: {result}") # Оставляем жучок для логов
-        return "true" in result
+        # Принудительно пишем ответ нейросети
+        print(f"🤖 ОТВЕТ GEMINI: {result}", flush=True)
         
+        return "true" in result
     except Exception as e:
-        print(f"❌ Ошибка ИИ: {e}")
+        # Принудительно пишем ошибку, если она будет
+        print(f"❌ Ошибка ИИ: {e}", flush=True)
         return False
+
 
 
 
