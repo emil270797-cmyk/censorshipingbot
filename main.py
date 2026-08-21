@@ -9,7 +9,6 @@ from flask import Flask
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, LabeledPrice, PreCheckoutQuery
 from aiogram.filters import Command
-from google import genai
 
 # --- 1. ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 app = Flask('')
@@ -107,7 +106,12 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
-client = genai.Client(api_key=GEMINI_KEY)
+
+# Правильная инициализация Gemini
+import google.generativeai as genai
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
+
 
 # --- 4. ФИЛЬТРЫ ---
 import pymorphy3
@@ -484,6 +488,20 @@ async def handle_messages(m: Message):
         
     add_chat(m.chat.id)
     text = m.text
+    
+    # --- НОВЫЙ БЛОК: ИММУНИТЕТ ДЛЯ АДМИНОВ ---
+    # Если пишет обычный человек (не от имени канала)
+    if m.from_user:
+        try:
+            member = await bot.get_chat_member(m.chat.id, m.from_user.id)
+            if member.status in ['creator', 'administrator']:
+                return # Админам можно всё, прекращаем проверку сообщения
+        except Exception:
+            pass
+    # ----------------------------------------
+    
+    # ... дальше идет ваш код проверки на ссылки и мат ...
+
     # ... дальше идет ваш старый код проверки на ссылки и мат ...
 
     
