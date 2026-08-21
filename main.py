@@ -386,6 +386,34 @@ async def cmd_chatlist(m: Message, bot: Bot):
     except Exception as e:
         await m.answer(f"❌ Ошибка отправки списка (возможно, он слишком длинный): {e}")
 
+# Команда /give_premium (Выдать премиум бесплатно - только для владельца)
+@dp.message(Command("give_premium"))
+async def cmd_give_premium(m: Message):
+    # ВПИШИТЕ СЮДА ВАШ TELEGRAM ID (как в /botstats)
+    OWNER_ID = 1234567890 
+    
+    if m.from_user.id != OWNER_ID:
+        return
+        
+    try:
+        # Даем премиум на 30 дней от текущего момента
+        future_time = (datetime.now() + timedelta(days=30)).timestamp()
+        
+        # Обновляем данные текущего чата в базе
+        cursor.execute('''
+            UPDATE chats_v2 
+            SET ai_enabled = TRUE, premium_until = %s 
+            WHERE chat_id = %s
+        ''', (future_time, m.chat.id))
+        
+        # Если вы используете conn.commit() в других местах, раскомментируйте строку ниже
+        # conn.commit() 
+        
+        await m.answer("🎁 <b>Режим разработчика:</b> Premium-статус (ИИ-модерация) успешно активирован в этом чате на 30 дней!", parse_mode="HTML")
+    except Exception as e:
+        await m.answer(f"❌ Ошибка при выдаче Premium: {e}")
+
+
 
 # --- ОПЛАТА PREMIUM ЧЕРЕЗ TELEGRAM STARS ---
 
