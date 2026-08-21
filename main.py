@@ -460,8 +460,9 @@ async def successful_payment_handler(m: Message):
 
 # --- ФУНКЦИЯ ИИ-МОДЕРАЦИИ (Gemini) ---
 async def ai_filter(text: str) -> bool:
+    import aiohttp # Используем прямое подключение вместо библиотеки Google
+    
     try:
-        # Принудительно пишем в лог, что ИИ начал думать
         print(f"🧠 ОТПРАВЛЯЮ В GEMINI: {text[:20]}...", flush=True)
         
         prompt = (
@@ -476,24 +477,40 @@ async def ai_filter(text: str) -> bool:
             f"Сообщение для проверки: {text}"
         )
         
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-        ]
+        # Прямая ссылка на сервер Google (самая быстрая модель 1.5-flash)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
         
-        response = model.generate_content(prompt, safety_settings=safety_settings)
-        result = response.text.strip().lower()
+        # Упаковываем запрос и отключаем цензуру
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "safetySettings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
+        }
         
-        # Принудительно пишем ответ нейросети
-        print(f"🤖 ОТВЕТ GEMINI: {result}", flush=True)
-        
-        return "true" in result
+        # Отправляем прямой запрос
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload) as resp:
+                data = await resp.json()
+                
+                # Если Google ругается, выводим его ответ
+                if resp.status != 200:
+                    print(f"❌ Ошибка API Google: {data}", flush=True)
+                    return False
+                    
+                # Достаем ответ нейросети
+                result = data['candidates'][0]['content']['parts'][0]['text'].strip().lower()
+                print(f"🤖 ОТВЕТ GEMINI: {result}", flush=True)
+                
+                return "true" in result
+                
     except Exception as e:
-        # Принудительно пишем ошибку, если она будет
-        print(f"❌ Ошибка ИИ: {e}", flush=True)
+        print(f"❌ Системная ошибка ИИ: {e}", flush=True)
         return False
+
 
 
 
