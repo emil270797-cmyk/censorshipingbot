@@ -390,7 +390,7 @@ async def cmd_chatlist(m: Message, bot: Bot):
 @dp.message(Command("give_premium"))
 async def cmd_give_premium(m: Message):
     # ВПИШИТЕ СЮДА ВАШ TELEGRAM ID (как в /botstats)
-    OWNER_ID = 1234567890 
+    OWNER_ID = 354584527 
     
     if m.from_user.id != OWNER_ID:
         return
