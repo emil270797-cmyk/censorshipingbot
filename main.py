@@ -496,7 +496,14 @@ async def ai_filter(text: str) -> bool:
         
         # Отправляем прямой запрос
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as resp:
+    async with session.post(
+        url,
+        headers={
+            "x-goog-api-key": GEMINI_KEY,
+            "Content-Type": "application/json"
+        },
+        json=payload
+    ) as resp:
                 data = await resp.json()
                 
                 # Если Google ругается, выводим его ответ
