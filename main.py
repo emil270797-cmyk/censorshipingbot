@@ -471,13 +471,25 @@ async def ai_filter(text: str) -> bool:
             f"Сообщение для проверки: {text}"
         )
         
-        response = model.generate_content(prompt)
+        # 🔴 ОТКЛЮЧАЕМ ВСТРОЕННЫЕ ФИЛЬТРЫ GOOGLE 🔴
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+        ]
+        
+        # Отправляем запрос вместе с разрешением на опасный контент
+        response = model.generate_content(prompt, safety_settings=safety_settings)
         result = response.text.strip().lower()
         
+        print(f"🤖 ОТВЕТ GEMINI: {result}") # Оставляем жучок для логов
         return "true" in result
+        
     except Exception as e:
-        print(f"Ошибка ИИ: {e}")
+        print(f"❌ Ошибка ИИ: {e}")
         return False
+
 
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
