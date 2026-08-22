@@ -29,17 +29,26 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS chats_v2 (
     ai_enabled BOOLEAN DEFAULT FALSE,
     premium_until DOUBLE PRECISION DEFAULT 0
 )''')
+
 cursor.execute('''CREATE TABLE IF NOT EXISTS warns (
     user_id BIGINT, 
     chat_id BIGINT, 
     count INTEGER,
     UNIQUE(user_id, chat_id)
 )''')
+
 cursor.execute('''CREATE TABLE IF NOT EXISTS stats (
     chat_id BIGINT PRIMARY KEY, 
     deleted_count INTEGER DEFAULT 0, 
-    mute_count INTEGER DEFAULT 0
+    mute_count INTEGER DEFAULT 0,
+    ai_requests INTEGER DEFAULT 0
 )''')
+
+# На всякий случай проверяем, есть ли колонка ai_requests (если таблица была создана до обновления)
+try:
+    cursor.execute('ALTER TABLE stats ADD COLUMN IF NOT EXISTS ai_requests INTEGER DEFAULT 0')
+except Exception:
+    pass
 
 def add_chat(chat_id):
     cursor.execute('INSERT INTO chats_v2 (chat_id, ai_enabled, premium_until) VALUES (%s, FALSE, 0) ON CONFLICT (chat_id) DO NOTHING', (chat_id,))
@@ -74,16 +83,18 @@ def reset_warns(user_id, chat_id):
     cursor.execute('DELETE FROM warns WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
 
 def record_stat(chat_id, stat_type):
-    cursor.execute('INSERT INTO stats (chat_id, deleted_count, mute_count) VALUES (%s, 0, 0) ON CONFLICT (chat_id) DO NOTHING', (chat_id,))
+    cursor.execute('INSERT INTO stats (chat_id, deleted_count, mute_count, ai_requests) VALUES (%s, 0, 0, 0) ON CONFLICT (chat_id) DO NOTHING', (chat_id,))
     if stat_type == 'delete':
         cursor.execute('UPDATE stats SET deleted_count = deleted_count + 1 WHERE chat_id = %s', (chat_id,))
     elif stat_type == 'mute':
         cursor.execute('UPDATE stats SET mute_count = mute_count + 1 WHERE chat_id = %s', (chat_id,))
+    elif stat_type == 'ai':
+        cursor.execute('UPDATE stats SET ai_requests = ai_requests + 1 WHERE chat_id = %s', (chat_id,))
 
 def get_stats(chat_id):
-    cursor.execute('SELECT deleted_count, mute_count FROM stats WHERE chat_id = %s', (chat_id,))
+    cursor.execute('SELECT deleted_count, mute_count, ai_requests FROM stats WHERE chat_id = %s', (chat_id,))
     res = cursor.fetchone()
-    return res if res else (0, 0)
+    return res if res else (0, 0, 0)
 
 
 # --- 3. БАЗОВЫЙ ФИЛЬТР (МАТ И СЛОВАРЬ) ---
@@ -280,7 +291,7 @@ async def show_stats(m: Message):
         await m.answer("❌ Эта команда доступна только администраторам чата.")
         return
 
-    d_count, m_count = get_stats(m.chat.id)
+    d_count, m_count, ai_reqs = get_stats(m.chat.id)
     await m.answer(
         f"📊 <b>Статистика модерации:</b>\n\n"
         f"🗑 Удалено сообщений: <b>{d_count}</b>\n"
@@ -320,26 +331,46 @@ async def cmd_botstats(m: Message):
 async def cmd_chatlist(m: Message, bot: Bot):
     if m.from_user.id != OWNER_ID: return
 
-    cursor.execute('SELECT chat_id, ai_enabled, premium_until FROM chats_v2 LIMIT 30')
-    chats = cursor.fetchall()
+    cursor.execute('''
+        SELECT c.chat_id, c.ai_enabled, c.premium_until, COALESCE(s.ai_requests, 0)
+        FROM chats_v2 c
+        LEFT JOIN stats s ON c.chat_id = s.chat_id
+        ORDER BY COALESCE(s.ai_requests, 0) DESC
+    ''')
+    all_chats = cursor.fetchall()
     
-    if not chats:
+    if not all_chats:
         await m.answer("Список чатов пока пуст.")
         return
         
-    await m.answer("⏳ Собираю информацию о чатах...")
-    text = "📋 <b>Список чатов с ботом:</b>\n\n"
+    await m.answer("⏳ Собираю аналитику по чатам...")
+    text = "📊 <b>Аналитика чатов (по расходу ИИ):</b>\n\n"
     current_time = datetime.now().timestamp()
     
-    for chat_id, ai_enabled, premium_until in chats:
+    active_count = 0
+    
+    for chat_id, ai_enabled, premium_until, ai_reqs in all_chats:
+        if active_count >= 20:
+            break
+            
         try:
             chat_info = await bot.get_chat(chat_id)
             chat_name = chat_info.title or "Без названия"
             status = "🌟 PREMIUM" if (ai_enabled and premium_until and premium_until > current_time) else "🌑 Базовый"
-            text += f"🔹 <b>{chat_name}</b>\n└ Статус: {status}\n\n"
-        except Exception:
-            text += f"🔹 <i>Чат недоступен (ID: {chat_id})</i>\n└ Скорее всего, бота оттуда удалили\n\n"
             
+            text += f"🔹 <b>{chat_name}</b>\n"
+            text += f"├ Статус: {status}\n"
+            text += f"└ Запросов к ИИ: <b>{ai_reqs}</b>\n\n"
+            active_count += 1
+            
+        except Exception:
+            cursor.execute('DELETE FROM chats_v2 WHERE chat_id = %s', (chat_id,))
+            cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
+            continue
+            
+    if active_count == 0:
+        text = "К сожалению, бот был удален из всех известных чатов."
+        
     try:
         await m.answer(text, parse_mode="HTML")
     except Exception as e:
@@ -458,6 +489,7 @@ async def handle_messages(m: Message):
         
     # 4. Проверка нейросетью (Если базовый пропустил и включен Premium)
     if is_ai(m.chat.id):
+        record_stat(m.chat.id, 'ai') # 👈 Накручиваем счетчик перед проверкой!
         is_bad = await ai_filter(text)
         if is_bad:
             await punish(m, "Токсичность/Скрытый мат (AI)")
