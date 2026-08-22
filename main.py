@@ -477,12 +477,9 @@ async def ai_filter(text: str) -> bool:
             f"Сообщение для проверки: {text}"
         )
         
-        # Прямая ссылка на сервер Google (самая быстрая модель 1.5-flash)
-                # Прямая ссылка на актуальную модель Gemini
-        model = genai.GenerativeModel("gemini-3.6-flash")
-        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent"
+                # Прямая ссылка на сервер Google (стабильная модель 1.5-flash)
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
 
-        
         # Упаковываем запрос и отключаем цензуру
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -496,14 +493,7 @@ async def ai_filter(text: str) -> bool:
         
         # Отправляем прямой запрос
         async with aiohttp.ClientSession() as session:
-    async with session.post(
-        url,
-        headers={
-            "x-goog-api-key": GEMINI_KEY,
-            "Content-Type": "application/json"
-        },
-        json=payload
-    ) as resp:
+            async with session.post(url, json=payload) as resp:
                 data = await resp.json()
                 
                 # Если Google ругается, выводим его ответ
@@ -516,6 +506,7 @@ async def ai_filter(text: str) -> bool:
                 print(f"🤖 ОТВЕТ GEMINI: {result}", flush=True)
                 
                 return "true" in result
+
                 
     except Exception as e:
         print(f"❌ Системная ошибка ИИ: {e}", flush=True)
