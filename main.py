@@ -200,17 +200,30 @@ async def ai_filter(text: str) -> bool:
 # --- 5. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ И АДМИНОВ ---
 @dp.message(Command("start"))
 async def cmd_start(m: Message):
-    # Обновленная клавиатура с кнопкой-ссылкой
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    # --- 1. Создаем нижние "серые" кнопки ---
+    bottom_keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="/status"), KeyboardButton(text="/stats")],
+            [KeyboardButton(text="/buy_premium")]
+        ],
+        resize_keyboard=True, # Делает кнопки компактными
+        input_field_placeholder="Выберите команду..."
+    )
+
+    # --- 2. Создаем прозрачные кнопки-меню ---
+    inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🌟 Подключить Premium", callback_data="menu_premium")],
         [
             InlineKeyboardButton(text="📊 Статистика", callback_data="menu_stats"),
             InlineKeyboardButton(text="⚙️ Статус", callback_data="menu_status")
         ],
-        # Вместо callback_data здесь используется параметр url
-        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/emmil27")]
+        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/ВАШ_ЛОГИН")] # Не забудьте свой логин!
     ])
 
+    # --- 3. Отправляем скрытое сообщение для активации нижних кнопок ---
+    await m.answer("⌨️ <i>Клавиатура быстрого доступа активирована!</i>", reply_markup=bottom_keyboard, parse_mode="HTML")
+
+    # --- 4. Отправляем главное приветствие с прозрачными кнопками ---
     text = (
         "👋 <b>Добро пожаловать! Я — умный AI-модератор.</b>\n\n"
         "Моя задача — автоматически очищать ваши чаты и комментарии в каналах от скрытого спама, рекламы и токсичных пользователей с помощью нейросети.\n\n"
@@ -218,14 +231,14 @@ async def cmd_start(m: Message):
         "<b>1.</b> Добавьте меня в вашу группу (или в привязанный чат канала для комментариев).\n"
         "<b>2.</b> Выдайте мне права администратора: <i>«Удаление сообщений»</i> и <i>«Блокировка пользователей»</i>. Без них я не смогу наводить порядок!\n\n"
         "📌 <b>ОСНОВНЫЕ КОМАНДЫ:</b>\n"
-        "<i>(Вводите их прямо в вашей группе, а не здесь)</i>\n"
-        "🔹 /status — проверить, активна ли защита в текущем чате.\n"
-        "🔹 /stats — посмотреть статистику удаленного мусора и выданных мутов.\n"
-        "🔹 /buy_premium — активировать ИИ-модуль для защиты от хитрого спама.\n\n"
-        "👇 Используйте кнопки ниже для быстрого управления подпиской и профилем:"
+        "<i>(Вводите их прямо в вашей группе или используйте нижнее меню)</i>\n"
+        "🔹 /status — проверить, активна ли защита в чате.\n"
+        "🔹 /stats — посмотреть статистику удаленного мусора.\n"
+        "🔹 /buy_premium — активировать ИИ-модуль Gemini.\n\n"
+        "👇 Используйте кнопки ниже для быстрого управления:"
     )
     
-    await m.answer(text, reply_markup=keyboard, parse_mode="HTML")
+    await m.answer(text, reply_markup=inline_keyboard, parse_mode="HTML")
 
 @dp.message(Command("status"), F.chat.type.in_({"group", "supergroup"}))
 async def chat_status(m: Message):
