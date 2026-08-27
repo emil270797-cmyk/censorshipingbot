@@ -8,7 +8,7 @@ from datetime import timedelta, datetime
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, LabeledPrice, PreCheckoutQuery, ChatPermissions, Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, LabeledPrice, PreCheckoutQuery, ChatPermissions, Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 
 # --- 1. НАСТРОЙКИ БОТА И API ---
