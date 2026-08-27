@@ -446,7 +446,7 @@ async def punish(m: Message, reason: str):
             text = f"🛑 <b>{user_name}</b>, лимит исчерпан (3/3). \nВы получаете мут на 1 час."
 
         # 3. ОТПРАВЛЯЕМ ВАРН СНАЧАЛА (Aiogram сам найдет нужную ветку комментариев)
-        w = await m.answer(text, parse_mode="HTML")
+        w = await m.reply(text, parse_mode="HTML")
         
         # 4. ТЕПЕРЬ удаляем сам мусор
         await m.delete()
