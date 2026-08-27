@@ -217,7 +217,7 @@ async def cmd_start(m: Message):
             InlineKeyboardButton(text="📊 Статистика", callback_data="menu_stats"),
             InlineKeyboardButton(text="⚙️ Статус", callback_data="menu_status")
         ],
-        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/ВАШ_ЛОГИН")] # Не забудьте свой логин!
+        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/emmil27")] # Не забудьте свой логин!
     ])
 
     # --- 3. Отправляем скрытое сообщение для активации нижних кнопок ---
