@@ -200,17 +200,17 @@ async def ai_filter(text: str) -> bool:
 # --- 5. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ И АДМИНОВ ---
 @dp.message(Command("start"))
 async def cmd_start(m: Message):
-    # Клавиатура остается той же
+    # Обновленная клавиатура с кнопкой-ссылкой
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🌟 Подключить Premium", callback_data="menu_premium")],
         [
             InlineKeyboardButton(text="📊 Статистика", callback_data="menu_stats"),
             InlineKeyboardButton(text="⚙️ Статус", callback_data="menu_status")
         ],
-        [InlineKeyboardButton(text="❓ Как настроить бота?", callback_data="menu_help")]
+        # Вместо callback_data здесь используется параметр url
+        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/emmil27")]
     ])
 
-    # Новый, подробный и структурированный текст
     text = (
         "👋 <b>Добро пожаловать! Я — умный AI-модератор.</b>\n\n"
         "Моя задача — автоматически очищать ваши чаты и комментарии в каналах от скрытого спама, рекламы и токсичных пользователей с помощью нейросети.\n\n"
@@ -221,7 +221,7 @@ async def cmd_start(m: Message):
         "<i>(Вводите их прямо в вашей группе, а не здесь)</i>\n"
         "🔹 /status — проверить, активна ли защита в текущем чате.\n"
         "🔹 /stats — посмотреть статистику удаленного мусора и выданных мутов.\n"
-        "🔹 /buy_premium — активировать ИИ-модуль Gemini для защиты от завуалированного мата и хитрого спама.\n\n"
+        "🔹 /buy_premium — активировать ИИ-модуль для защиты от хитрого спама.\n\n"
         "👇 Используйте кнопки ниже для быстрого управления подпиской и профилем:"
     )
     
