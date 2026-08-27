@@ -418,9 +418,7 @@ async def successful_payment_handler(m: Message):
 # --- 7. ОСНОВНОЙ ПРОЦЕСС МОДЕРАЦИИ ---
 async def punish(m: Message, reason: str):
     try:
-        await m.delete()
-        record_stat(m.chat.id, 'delete')
-        
+        # 1. Определяем нарушителя (пользователь или другой канал)
         if m.sender_chat:
             user_id = m.sender_chat.id
             user_name = f"Канал {m.sender_chat.title}"
@@ -430,6 +428,7 @@ async def punish(m: Message, reason: str):
             
         warns = add_warn(user_id, m.chat.id)
         
+        # 2. Формируем текст наказания
         if warns == 1:
             text = f"🚫 <b>{user_name}</b>, сообщение удалено ({reason}). \nЭто ваше первое предупреждение (1/3)."
         elif warns == 2:
@@ -446,11 +445,24 @@ async def punish(m: Message, reason: str):
             reset_warns(user_id, m.chat.id)
             text = f"🛑 <b>{user_name}</b>, лимит исчерпан (3/3). \nВы получаете мут на 1 час."
 
-        w = await m.answer(text, parse_mode="HTML")
+        # 3. ОТПРАВЛЯЕМ ВАРН ДО УДАЛЕНИЯ, строго в нужную ветку комментариев
+        w = await bot.send_message(
+            chat_id=m.chat.id,
+            text=text,
+            message_thread_id=m.message_thread_id,
+            parse_mode="HTML"
+        )
+        
+        # 4. Теперь удаляем сам мусор
+        await m.delete()
+        record_stat(m.chat.id, 'delete')
+
+        # 5. Ждем 10 секунд и удаляем варн, чтобы не засорять комменты
         await asyncio.sleep(10)
         await w.delete()
+        
     except Exception as e:
-        print(f"Ошибка при выдаче наказания: {e}")
+        print(f"Ошибка при выдаче наказания: {e}", flush=True)
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_messages(m: Message):
