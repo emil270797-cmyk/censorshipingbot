@@ -453,8 +453,8 @@ async def punish(m: Message, reason: str):
         record_stat(m.chat.id, 'delete')
 
         # 5. Ждем 10 секунд и удаляем варн
-        #await asyncio.sleep(10)
-        #await w.delete()
+        await asyncio.sleep(10)
+        await w.delete()
         
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}", flush=True)
