@@ -512,6 +512,8 @@ async def punish(m: Message, reason: str):
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}", flush=True)
 
+# 👇 Вот эту первую строчку мы добавили для отлова изменений
+@dp.edited_message(F.chat.type.in_({"group", "supergroup"}))
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_messages(m: Message):
     if not m.text or m.is_automatic_forward:
@@ -553,6 +555,7 @@ async def handle_messages(m: Message):
         is_bad = await ai_filter(text)
         if is_bad:
             await punish(m, "Токсичность/Скрытый мат (AI)")
+
 
 
 # --- 8. ЗАПУСК БОТА И ВЕБ-СЕРВЕРА ---
