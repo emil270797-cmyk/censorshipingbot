@@ -412,8 +412,10 @@ async def cmd_chatlist(m: Message, bot: Bot):
             status = "🌟 PREMIUM" if (ai_enabled and premium_until and premium_until > current_time) else "🌑 Базовый"
             
             text += f"🔹 <b>{chat_name}</b>\n"
+            text += f"├ ID: <code>{chat_id}</code>\n"
             text += f"├ Статус: {status}\n"
             text += f"└ Запросов к ИИ: <b>{ai_reqs}</b>\n\n"
+
             active_count += 1
             
         except Exception:
@@ -432,12 +434,28 @@ async def cmd_chatlist(m: Message, bot: Bot):
 @dp.message(Command("give_premium"))
 async def cmd_give_premium(m: Message):
     if m.from_user.id != OWNER_ID: return
+    
+    # Разбиваем сообщение на части: ["/give_premium", "-100123456789"]
+    args = m.text.split()
+    
+    if len(args) < 2:
+        await m.answer("⚠️ <b>Ошибка:</b> Укажите ID чата.\nПример: <code>/give_premium -100123456789</code>", parse_mode="HTML")
+        return
+        
     try:
+        target_chat_id = int(args[1])
         future_time = (datetime.now() + timedelta(days=30)).timestamp()
-        cursor.execute('UPDATE chats_v2 SET ai_enabled = TRUE, premium_until = %s WHERE chat_id = %s', (future_time, m.chat.id))
-        await m.answer("🎁 <b>Режим разработчика:</b> Premium активирован на 30 дней!", parse_mode="HTML")
+        
+        # Обновляем статус именно для указанного target_chat_id
+        cursor.execute('UPDATE chats_v2 SET ai_enabled = TRUE, premium_until = %s WHERE chat_id = %s', (future_time, target_chat_id))
+        
+        await m.answer(f"✅ <b>Успешно!</b>\nPremium на 30 дней выдан чату: <code>{target_chat_id}</code>", parse_mode="HTML")
+        
+    except ValueError:
+        await m.answer("❌ ID чата должен быть числом.")
     except Exception as e:
         await m.answer(f"❌ Ошибка при выдаче Premium: {e}")
+
 
 @dp.message(Command("buy_premium"), F.chat.type.in_({"group", "supergroup"}))
 async def send_invoice(m: Message):
