@@ -45,15 +45,16 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS stats (
 )''')
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS moderation_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    chat_id INTEGER,
-    user_id INTEGER,
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT,
+    user_id BIGINT,
     user_name TEXT,
     reason TEXT,
     action_type TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )''')
 conn.commit()
+
 
 
 # На всякий случай проверяем, есть ли колонка ai_requests (если таблица была создана до обновления)
@@ -296,7 +297,7 @@ async def send_report(m: Message):
     cursor.execute('''
         SELECT reason, COUNT(*) 
         FROM moderation_logs 
-        WHERE chat_id = ? 
+        WHERE chat_id = %s
         GROUP BY reason
     ''', (chat_id,))
     stats = cursor.fetchall()
@@ -305,7 +306,7 @@ async def send_report(m: Message):
     cursor.execute('''
         SELECT user_name, action_type, reason 
         FROM moderation_logs 
-        WHERE chat_id = ? 
+        WHERE chat_id = %s 
         ORDER BY created_at DESC 
         LIMIT 5
     ''', (chat_id,))
@@ -565,12 +566,13 @@ async def punish(m: Message, reason: str):
         warns = add_warn(user_id, m.chat.id)
         
         # --- ДОБАВЛЯЕМ ВОТ ЭТОТ БЛОК ---
-        # Записываем действие в журнал
+        # Записываем действие в журнал (Используем %s для PostgreSQL)
         cursor.execute(
-            'INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type) VALUES (%s, %s, %s, %s, %s)',
             (m.chat.id, user_id, user_name, reason, f"warn_{warns}")
         )
         conn.commit() 
+ 
         # -------------------------------
         
         # ... дальше идет ваш остальной код наказания (удаление сообщения, выдача мута) ...
