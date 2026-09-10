@@ -285,6 +285,57 @@ async def process_status_btn(callback: CallbackQuery):
     )
     await callback.answer()
 
+from aiogram.filters import Command
+
+@dp.message(Command("report"))
+async def send_report(m: Message):
+    # Проверяем, что команду вызвали в группе (или передаем ID группы, если ЛС)
+    chat_id = m.chat.id
+    
+    # 1. Считаем общую статистику по причинам
+    cursor.execute('''
+        SELECT reason, COUNT(*) 
+        FROM moderation_logs 
+        WHERE chat_id = ? 
+        GROUP BY reason
+    ''', (chat_id,))
+    stats = cursor.fetchall()
+    
+    # 2. Получаем 5 последних нарушителей
+    cursor.execute('''
+        SELECT user_name, action_type, reason 
+        FROM moderation_logs 
+        WHERE chat_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 5
+    ''', (chat_id,))
+    recent_logs = cursor.fetchall()
+    
+    if not stats:
+        await m.answer("📭 В этом чате пока нет записей о нарушениях.")
+        return
+
+    # 3. Формируем красивое сообщение
+    total_bans = sum([row[1] for row in stats])
+    
+    text = f"📋 **Отчет модерации для этого чата**\n\n"
+    text += f"🛡 Всего отражено угроз: **{total_bans}**\n"
+    
+    for row in stats:
+        reason_name = row[0]
+        count = row[1]
+        text += f"├ {reason_name}: {count}\n"
+        
+    text += "\n👤 **Последние нарушители:**\n"
+    for log in recent_logs:
+        user, action, reason = log
+        text += f"• `{user}` — {action} *(причина: {reason})*\n"
+        
+    text += "\n💡 *Ваш чат под защитой нейросети.*"
+    
+    await m.answer(text, parse_mode="Markdown")
+
+
 @dp.message(Command("status"), F.chat.type.in_({"group", "supergroup"}))
 async def chat_status(m: Message):
     cursor.execute('SELECT ai_enabled, premium_until FROM chats_v2 WHERE chat_id = %s', (m.chat.id,))
