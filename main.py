@@ -44,6 +44,18 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS stats (
     ai_requests INTEGER DEFAULT 0
 )''')
 
+cursor.execute('''CREATE TABLE IF NOT EXISTS moderation_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER,
+    user_id INTEGER,
+    user_name TEXT,
+    reason TEXT,
+    action_type TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)''')
+conn.commit()
+
+
 # На всякий случай проверяем, есть ли колонка ai_requests (если таблица была создана до обновления)
 try:
     cursor.execute('ALTER TABLE stats ADD COLUMN IF NOT EXISTS ai_requests INTEGER DEFAULT 0')
