@@ -8,7 +8,7 @@ from datetime import timedelta, datetime
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, LabeledPrice, PreCheckoutQuery, ChatPermissions, Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, LabeledPrice, PreCheckoutQuery, ChatPermissions, Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated
 from aiogram.filters import Command
 
 # --- 1. НАСТРОЙКИ БОТА И API ---
@@ -264,6 +264,28 @@ async def cmd_start(m: Message):
     )
     
     await m.answer(text, reply_markup=inline_keyboard, parse_mode="HTML")
+
+# Ловим события добавления бота в группу или выдачи ему прав
+@dp.my_chat_member()
+async def bot_added_to_chat(event: ChatMemberUpdated):
+    # Если статус бота изменился на 'member' (участник) или 'administrator' (админ)
+    if event.new_chat_member.status in ['member', 'administrator']:
+        chat_id = event.chat.id
+        admin_id = event.from_user.id # ID того, кто добавил бота
+        
+        try:
+            # Записываем связку в базу
+            cursor.execute(
+                '''INSERT INTO chat_admins (chat_id, admin_id) 
+                   VALUES (%s, %s) 
+                   ON CONFLICT (chat_id, admin_id) DO NOTHING''',
+                (chat_id, admin_id)
+            )
+            conn.commit()
+            print(f"✅ Авто-привязка: Чат {event.chat.title} закреплен за {admin_id}")
+        except Exception as e:
+            print(f"❌ Ошибка авто-привязки: {e}")
+
 
 # --- ОБРАБОТЧИКИ НАЖАТИЙ НА КНОПКИ МЕНЮ ---
 
