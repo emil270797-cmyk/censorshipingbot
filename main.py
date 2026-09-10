@@ -513,6 +513,17 @@ async def punish(m: Message, reason: str):
             
         warns = add_warn(user_id, m.chat.id)
         
+        # --- ДОБАВЛЯЕМ ВОТ ЭТОТ БЛОК ---
+        # Записываем действие в журнал
+        cursor.execute(
+            'INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type) VALUES (?, ?, ?, ?, ?)',
+            (m.chat.id, user_id, user_name, reason, f"warn_{warns}")
+        )
+        conn.commit() 
+        # -------------------------------
+        
+        # ... дальше идет ваш остальной код наказания (удаление сообщения, выдача мута) ...
+
         # 2. Формируем текст
         if warns == 1:
             text = f"🚫 <b>{user_name}</b>, сообщение удалено ({reason}). \nЭто ваше первое предупреждение (1/3)."
