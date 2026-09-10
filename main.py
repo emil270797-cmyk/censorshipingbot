@@ -55,6 +55,16 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS moderation_logs (
 )''')
 conn.commit()
 
+cursor.execute('''CREATE TABLE IF NOT EXISTS chat_admins (
+    id SERIAL PRIMARY KEY,
+    chat_id BIGINT,
+    admin_id BIGINT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(chat_id, admin_id)
+)''')
+conn.commit()
+
+
 
 
 # На всякий случай проверяем, есть ли колонка ai_requests (если таблица была создана до обновления)
