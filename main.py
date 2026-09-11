@@ -94,9 +94,6 @@ try:
 except Exception:
     pass
 
-def add_chat(chat_id):
-    cursor.execute('INSERT INTO chats_v2 (chat_id, ai_enabled, premium_until) VALUES (%s, FALSE, 0) ON CONFLICT (chat_id) DO NOTHING', (chat_id,))
-
 def set_ai(chat_id, status, days=30):
     until = (datetime.now() + timedelta(days=days)).timestamp() if status else 0
     cursor.execute('UPDATE chats_v2 SET ai_enabled = %s, premium_until = %s WHERE chat_id = %s', (status, until, chat_id))
