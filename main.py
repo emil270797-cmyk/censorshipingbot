@@ -233,15 +233,6 @@ async def cmd_start(m: Message):
         cursor.execute('SELECT chat_id FROM chat_admins WHERE admin_id = %s', (admin_id,))
         chats = cursor.fetchall()
 
-           # --- ДОБАВЛЯЕМ БЛОК ЛИЧНОГО КАБИНЕТА ---
-    if chats:
-        text += "\n\n🎛 <b>Ваши привязанные чаты:</b>\n"
-        for row in chats:
-            c_id = row[0]
-            text += f"• Чат ID: <code>{c_id}</code>\n"
-    else:
-        text += "\n\n📭 У вас пока нет привязанных чатов. Добавьте меня в группу как администратора!"
-    # ----------------------------------------
         
         # Если чаты есть, можете, например, дописать их в ваш текст приветствия
         # Или просто оставить вашу текущую логику со всеми красивыми кнопками!
@@ -285,7 +276,15 @@ async def cmd_start(m: Message):
         "🔹 /buy_premium — активировать ИИ-модуль Gemini.\n\n"
         "👇 Используйте кнопки ниже для быстрого управления:"
     )
-    
+    # --- ДОБАВЛЯЕМ БЛОК ЛИЧНОГО КАБИНЕТА ---
+    if chats:
+        text += "\n\n🎛 <b>Ваши привязанные чаты:</b>\n"
+        for row in chats:
+            c_id = row[0]
+            text += f"• Чат ID: <code>{c_id}</code>\n"
+    else:
+        text += "\n\n📭 У вас пока нет привязанных чатов. Добавьте меня в группу как администратора!"
+    # ----------------------------------------
     await m.answer(text, reply_markup=inline_keyboard, parse_mode="HTML")
 
 # Ловим события добавления бота в группу или выдачи ему прав
