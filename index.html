@@ -101,11 +101,13 @@
                                 ? '<span class="status-badge status-pro">🌟 ИИ-МОДЕРАТОР</span>' 
                                 : '<span class="status-badge status-basic">🌑 БАЗОВЫЙ ФИЛЬТР</span>';
                             
-                            card.innerHTML = `
-                                <h3>Чат: ${chat.chat_id}</h3>
+                                                        card.innerHTML = `
+                                <h3>💬 ${chat.chat_title}</h3>
+                                <div style="font-size: 12px; color: var(--tg-theme-hint-color, #707579); margin-bottom: 8px;">ID: ${chat.chat_id}</div>
                                 ${statusHtml}
-                                <button onclick="Telegram.WebApp.showAlert('Здесь скоро появится меню настроек для чата ${chat.chat_id}!')">⚙️ Настроить защиту</button>
+                                <button onclick="Telegram.WebApp.showAlert('Настройки для чата ${chat.chat_title} скоро появятся!')">⚙️ Настроить защиту</button>
                             `;
+
                             chatsContainer.appendChild(card);
                         });
                     } else {
