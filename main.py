@@ -8,8 +8,13 @@ from datetime import timedelta, datetime
 from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, LabeledPrice, PreCheckoutQuery, ChatPermissions, Message, ChatPermissions, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ChatMemberUpdated
 from aiogram.filters import Command
+# Я почистил импорты и добавил нужный WebAppInfo
+from aiogram.types import (
+    Message, LabeledPrice, PreCheckoutQuery, ChatPermissions, 
+    InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, 
+    ChatMemberUpdated, WebAppInfo
+)
 
 # --- 1. НАСТРОЙКИ БОТА И API ---
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -63,9 +68,6 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS chat_admins (
     UNIQUE(chat_id, admin_id)
 )''')
 conn.commit()
-
-
-
 
 # На всякий случай проверяем, есть ли колонка ai_requests (если таблица была создана до обновления)
 try:
@@ -170,7 +172,6 @@ def basic_filter(text: str) -> bool:
 
 
 # --- 4. ФУНКЦИЯ ИИ-МОДЕРАЦИИ (Gemini REST API) ---
-# Теперь функция принимает два параметра: имя автора и текст
 async def ai_filter(author_name: str, text: str) -> bool:
     try:
         print(f"🧠 ОТПРАВЛЯЮ В GEMINI: {author_name} - {text[:20]}...", flush=True)
@@ -187,8 +188,6 @@ async def ai_filter(author_name: str, text: str) -> bool:
         )
         
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_KEY}"
-        # ... дальше остается ваш код отправки запроса
-
         
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
@@ -225,48 +224,33 @@ async def ai_filter(author_name: str, text: str) -> bool:
 # --- 5. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ И АДМИНОВ ---
 @dp.message(Command("start"))
 async def cmd_start(m: Message):
-    # Проверяем только в личных сообщениях
-    if m.chat.type == "private":
-        admin_id = m.from_user.id
-        
-        # Ищем привязанные чаты владельца
-        cursor.execute('SELECT chat_id FROM chat_admins WHERE admin_id = %s', (admin_id,))
-        chats = cursor.fetchall()
+    # Проверяем, что команда вызвана в личных сообщениях с ботом
+    if m.chat.type != "private":
+        return
 
-        
-        # Если чаты есть, можете, например, дописать их в ваш текст приветствия
-        # Или просто оставить вашу текущую логику со всеми красивыми кнопками!
+    admin_id = m.from_user.id
+    
+    # Ищем привязанные чаты владельца
+    cursor.execute('SELECT chat_id FROM chat_admins WHERE admin_id = %s', (admin_id,))
+    chats = cursor.fetchall()
 
-    # --- 1. Создаем нижние "серые" кнопки ---
-    bottom_keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="/status"), KeyboardButton(text="/stats")],
-            [KeyboardButton(text="/buy_premium")]
+    # Создаем прозрачные кнопки-меню
+    inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🌟 Подключить Premium", callback_data="buy_premium")
         ],
-        resize_keyboard=True, # Делает кнопки компактными
-        input_field_placeholder="Выберите команду..."
-    )
+        [
+            InlineKeyboardButton(
+                text="🎛 Открыть Личный Кабинет", 
+                web_app=WebAppInfo(url="https://core.telegram.org/bots/webapps")
+            )
+        ],
+        [
+            InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
+            InlineKeyboardButton(text="⚙️ Статус", callback_data="status")
+        ]
+    ])
 
-    # --- 2. Создаем прозрачные кнопки-меню ---
-    # Ваша текущая клавиатура (примерно так она выглядит):
-inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-    [
-        InlineKeyboardButton(text="🌟 Подключить Premium", callback_data="buy_premium")
-    ],
-    [
-        # --- ВОТ НАША НОВАЯ КНОПКА MINI APP ---
-        InlineKeyboardButton(
-            text="🎛 Открыть Личный Кабинет", 
-            web_app=WebAppInfo(url="https://core.telegram.org/bots/webapps") # Пока ставим заглушку
-        )
-        # --------------------------------------
-    ],
-    [
-        InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
-        InlineKeyboardButton(text="⚙️ Статус", callback_data="status")
-    ]
-])
-# --- 3. Отправляем главное приветствие с прозрачными кнопками ---
     text = (
         "👋 <b>Добро пожаловать! Я — умный AI-модератор.</b>\n\n"
         "Моя задача — автоматически очищать ваши чаты и комментарии в каналах от скрытого спама, рекламы и токсичных пользователей с помощью нейросети.\n\n"
@@ -281,7 +265,7 @@ inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
         "👇 Используйте кнопки ниже для быстрого управления:"
     )
 
-    # --- ДОБАВЛЯЕМ БЛОК ЛИЧНОГО КАБИНЕТА ---
+    # ДОБАВЛЯЕМ БЛОК ЛИЧНОГО КАБИНЕТА
     if chats:
         text += "\n\n🎛 <b>Ваши привязанные чаты:</b>\n"
         for row in chats:
@@ -296,13 +280,11 @@ inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
 # Ловим события добавления бота в группу или выдачи ему прав
 @dp.my_chat_member()
 async def bot_added_to_chat(event: ChatMemberUpdated):
-    # Если статус бота изменился на 'member' (участник) или 'administrator' (админ)
     if event.new_chat_member.status in ['member', 'administrator']:
         chat_id = event.chat.id
-        admin_id = event.from_user.id # ID того, кто добавил бота
+        admin_id = event.from_user.id 
         
         try:
-            # Записываем связку в базу
             cursor.execute(
                 '''INSERT INTO chat_admins (chat_id, admin_id) 
                    VALUES (%s, %s) 
@@ -325,7 +307,6 @@ async def process_premium_btn(callback: CallbackQuery):
         "<i>Для оплаты добавьте бота (50 Stars) в группу и напишите команду /buy_premium или нажмите серую кнопку внизу.</i>",
         parse_mode="HTML"
     )
-    # Обязательно закрываем запрос, чтобы пропали "часики" загрузки
     await callback.answer()
 
 @dp.callback_query(F.data == "menu_stats")
@@ -346,14 +327,10 @@ async def process_status_btn(callback: CallbackQuery):
     )
     await callback.answer()
 
-from aiogram.filters import Command
-
 @dp.message(Command("report"))
 async def send_report(m: Message):
-    # Проверяем, что команду вызвали в группе (или передаем ID группы, если ЛС)
     chat_id = m.chat.id
     
-    # 1. Считаем общую статистику по причинам
     cursor.execute('''
         SELECT reason, COUNT(*) 
         FROM moderation_logs 
@@ -362,7 +339,6 @@ async def send_report(m: Message):
     ''', (chat_id,))
     stats = cursor.fetchall()
     
-    # 2. Получаем 5 последних нарушителей
     cursor.execute('''
         SELECT user_name, action_type, reason 
         FROM moderation_logs 
@@ -376,7 +352,6 @@ async def send_report(m: Message):
         await m.answer("📭 В этом чате пока нет записей о нарушениях.")
         return
 
-    # 3. Формируем красивое сообщение
     total_bans = sum([row[1] for row in stats])
     
     text = f"📋 **Отчет модерации для этого чата**\n\n"
@@ -395,7 +370,6 @@ async def send_report(m: Message):
     text += "\n💡 *Ваш чат под защитой нейросети.*"
     
     await m.answer(text, parse_mode="Markdown")
-
 
 @dp.message(Command("status"), F.chat.type.in_({"group", "supergroup"}))
 async def chat_status(m: Message):
@@ -561,7 +535,6 @@ async def cmd_chatlist(m: Message, bot: Bot):
 async def cmd_give_premium(m: Message):
     if m.from_user.id != OWNER_ID: return
     
-    # Разбиваем сообщение на части: ["/give_premium", "-100123456789"]
     args = m.text.split()
     
     if len(args) < 2:
@@ -572,7 +545,6 @@ async def cmd_give_premium(m: Message):
         target_chat_id = int(args[1])
         future_time = (datetime.now() + timedelta(days=30)).timestamp()
         
-        # Обновляем статус именно для указанного target_chat_id
         cursor.execute('UPDATE chats_v2 SET ai_enabled = TRUE, premium_until = %s WHERE chat_id = %s', (future_time, target_chat_id))
         
         await m.answer(f"✅ <b>Успешно!</b>\nPremium на 30 дней выдан чату: <code>{target_chat_id}</code>", parse_mode="HTML")
@@ -581,7 +553,6 @@ async def cmd_give_premium(m: Message):
         await m.answer("❌ ID чата должен быть числом.")
     except Exception as e:
         await m.answer(f"❌ Ошибка при выдаче Premium: {e}")
-
 
 @dp.message(Command("buy_premium"), F.chat.type.in_({"group", "supergroup"}))
 async def send_invoice(m: Message):
@@ -615,7 +586,6 @@ async def successful_payment_handler(m: Message):
 # --- 7. ОСНОВНОЙ ПРОЦЕСС МОДЕРАЦИИ ---
 async def punish(m: Message, reason: str):
     try:
-        # 1. Определяем нарушителя
         if m.sender_chat:
             user_id = m.sender_chat.id
             user_name = f"Канал {m.sender_chat.title}"
@@ -625,19 +595,12 @@ async def punish(m: Message, reason: str):
             
         warns = add_warn(user_id, m.chat.id)
         
-        # --- ДОБАВЛЯЕМ ВОТ ЭТОТ БЛОК ---
-        # Записываем действие в журнал (Используем %s для PostgreSQL)
         cursor.execute(
             'INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type) VALUES (%s, %s, %s, %s, %s)',
             (m.chat.id, user_id, user_name, reason, f"warn_{warns}")
         )
         conn.commit() 
  
-        # -------------------------------
-        
-        # ... дальше идет ваш остальной код наказания (удаление сообщения, выдача мута) ...
-
-        # 2. Формируем текст
         if warns == 1:
             text = f"🚫 <b>{user_name}</b>, сообщение удалено ({reason}). \nЭто ваше первое предупреждение (1/3)."
         elif warns == 2:
@@ -654,21 +617,16 @@ async def punish(m: Message, reason: str):
             reset_warns(user_id, m.chat.id)
             text = f"🛑 <b>{user_name}</b>, лимит исчерпан (3/3). \nВы получаете мут на 1 час."
 
-        # 3. ОТПРАВЛЯЕМ ВАРН СНАЧАЛА (Aiogram сам найдет нужную ветку комментариев)
         w = await m.reply(text, parse_mode="HTML")
-        
-        # 4. ТЕПЕРЬ удаляем сам мусор
         await m.delete()
         record_stat(m.chat.id, 'delete')
 
-        # 5. Ждем 10 секунд и удаляем варн
         await asyncio.sleep(10)
         await w.delete()
         
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}", flush=True)
 
-# 👇 Вот эту первую строчку мы добавили для отлова изменений
 @dp.edited_message(F.chat.type.in_({"group", "supergroup"}))
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_messages(m: Message):
@@ -678,7 +636,6 @@ async def handle_messages(m: Message):
     add_chat(m.chat.id)
     text = m.text
     
-    # 1. Иммунитет для администраторов
     if m.from_user:
         try:
             member = await bot.get_chat_member(m.chat.id, m.from_user.id)
@@ -687,7 +644,6 @@ async def handle_messages(m: Message):
         except Exception:
             pass
             
-    # 2. Проверка на ссылки (Только для Premium)
     if is_ai(m.chat.id):
         has_link = False
         if m.entities:
@@ -700,23 +656,16 @@ async def handle_messages(m: Message):
             await punish(m, "Спам/Отправка ссылок")
             return
             
-    # 3. Базовый словарный фильтр
     if basic_filter(text):
         await punish(m, "Мат/Запрещенное слово")
         return
         
-    # 4. Проверка нейросетью (Если базовый пропустил и включен Premium)
     if is_ai(m.chat.id):
         record_stat(m.chat.id, 'ai')
-        # Получаем имя человека ИЛИ название канала, если он пишет от лица канала
         author = m.sender_chat.title if m.sender_chat else m.from_user.first_name
-        
-        # Отправляем в ИИ и имя, и текст
         is_bad = await ai_filter(author, text)
         if is_bad:
             await punish(m, "Токсичность/Спам-бот (AI)")
-
-
 
 
 # --- 8. ЗАПУСК БОТА И ВЕБ-СЕРВЕРА ---
@@ -736,3 +685,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
