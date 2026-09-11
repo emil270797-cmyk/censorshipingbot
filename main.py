@@ -53,6 +53,7 @@ def add_chat(chat_id, title="Без названия"):
 
 
 
+
 cursor.execute('''CREATE TABLE IF NOT EXISTS warns (
     user_id BIGINT, 
     chat_id BIGINT, 
