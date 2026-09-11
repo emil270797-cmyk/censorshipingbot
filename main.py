@@ -691,6 +691,7 @@ async def handle_messages(m: Message):
 
 
 # --- 8. ЗАПУСК БОТА И ВЕБ-СЕРВЕРА ---
+# --- БЛОК FLASK WEB-SERVER И API ---
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -699,14 +700,22 @@ app = Flask(__name__)
 def home():
     return "Бот-модератор работает!"
 
-@app.route('/api/get_chats', methods=['GET'])
+@app.route('/api/get_chats', methods=['GET', 'OPTIONS'])
 def api_get_chats():
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "GET")
+        return response
+
     user_id = request.args.get('user_id')
     if not user_id:
-        return jsonify({"error": "Не передан user_id"}), 400
+        res = jsonify({"error": "Не передан user_id"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        return res, 400
         
     try:
-        # Достаем чаты через связку с админами и сразу забираем chat_title
         cursor.execute('''
             SELECT c.chat_id, c.ai_enabled, c.chat_title 
             FROM chat_admins a 
@@ -732,34 +741,42 @@ def api_get_chats():
         response = jsonify({"error": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
-@app.route('/api/toggle_ai', methods=['POST'])
+
+@app.route('/api/toggle_ai', methods=['POST', 'OPTIONS'])
 def api_toggle_ai():
-    data = request.json
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "POST")
+        return response
+
+    data = request.json or {}
     chat_id = data.get('chat_id')
     user_id = data.get('user_id')
     
     if not chat_id or not user_id:
-        return jsonify({"error": "Не переданы chat_id или user_id"}), 400
+        res = jsonify({"error": "Не переданы chat_id или user_id"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        return res, 400
         
     try:
-        # Проверяем, действительно ли этот пользователь — администратор чата
         cursor.execute('SELECT 1 FROM chat_admins WHERE chat_id = %s AND admin_id = %s', (chat_id, user_id))
         if not cursor.fetchone():
-            return jsonify({"error": "У вас нет прав администратора в этом чате"}), 403
+            res = jsonify({"error": "У вас нет прав администратора в этом чате"})
+            res.headers.add("Access-Control-Allow-Origin", "*")
+            return res, 403
             
-        # Узнаем текущий статус ИИ в базе
         cursor.execute('SELECT ai_enabled FROM chats_v2 WHERE chat_id = %s', (chat_id,))
-        res = cursor.fetchone()
-        current_status = res[0] if res else False
+        res_db = cursor.fetchone()
+        current_status = res_db[0] if res_db else False
         
-        # Меняем статус на противоположный
         new_status = not current_status
         cursor.execute('UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s', (new_status, chat_id))
         conn.commit()
         
         response = jsonify({"status": "success", "ai_enabled": new_status})
         response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
         return response
         
     except Exception as e:
@@ -767,10 +784,10 @@ def api_toggle_ai():
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
 
-
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
 
 async def main():
     Thread(target=run_web).start()
