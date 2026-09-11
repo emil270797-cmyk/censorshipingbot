@@ -1,27 +1,75 @@
-<h2>Личный кабинет</h2>
-<p id="greeting">Загрузка данных...</p>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Панель управления</title>
+    <!-- Подключаем библиотеку Telegram -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        /* Автоматическая адаптация под цвета Telegram (Темная/Светлая тема) */
+        body {
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        .card {
+            background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        h2, h3 {
+            margin-top: 0;
+        }
+        button {
+            background-color: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            border: none;
+            border-radius: 8px;
+            padding: 14px 20px;
+            width: 100%;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        button:active {
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
 
-<div class="card">
-    <h3>Мои чаты</h3>
-    <p>Здесь скоро появится список ваших групп для быстрой настройки.</p>
-    <button onclick="Telegram.WebApp.showAlert('Настройки скоро будут доступны!')">Управление</button>
-</div>
+    <h2>Личный кабинет</h2>
+    <p id="greeting">Загрузка...</p>
 
-<script>
-    // Инициализируем приложение
-    const tg = window.Telegram.WebApp;
-    
-    // Говорим приложению развернуться на весь экран
-    tg.expand();
-    
-    // Говорим Telegram, что наше приложение готово к отображению
-    tg.ready();
+    <div class="card">
+        <h3>Мои чаты</h3>
+        <p>Здесь появится список ваших групп для настройки ИИ-модератора.</p>
+        <button onclick="Telegram.WebApp.showAlert('Настройки скоро будут доступны!')">Управление настройками</button>
+    </div>
 
-    // Достаем имя пользователя прямо из Telegram
-    const greetingElement = document.getElementById('greeting');
-    if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-        greetingElement.innerText = 'Добро пожаловать, ' + tg.initDataUnsafe.user.first_name + '!';
-    } else {
-        greetingElement.innerText = 'Добро пожаловать!';
-    }
-</script>
+    <script>
+        // Инициализируем приложение
+        const tg = window.Telegram.WebApp;
+        
+        // Говорим приложению развернуться на весь экран
+        tg.expand();
+        
+        // Говорим Telegram, что наше приложение готово к отображению
+        tg.ready();
+
+        // Достаем имя пользователя из Telegram и меняем текст
+        const greetingElement = document.getElementById('greeting');
+        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+            greetingElement.innerHTML = 'Добро пожаловать, <b>' + tg.initDataUnsafe.user.first_name + '</b>!';
+        } else {
+            greetingElement.innerText = 'Добро пожаловать!';
+        }
+    </script>
+</body>
+</html>
