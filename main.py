@@ -732,6 +732,41 @@ def api_get_chats():
         response = jsonify({"error": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+@app.route('/api/toggle_ai', methods=['POST'])
+def api_toggle_ai():
+    data = request.json
+    chat_id = data.get('chat_id')
+    user_id = data.get('user_id')
+    
+    if not chat_id or not user_id:
+        return jsonify({"error": "Не переданы chat_id или user_id"}), 400
+        
+    try:
+        # Проверяем, действительно ли этот пользователь — администратор чата
+        cursor.execute('SELECT 1 FROM chat_admins WHERE chat_id = %s AND admin_id = %s', (chat_id, user_id))
+        if not cursor.fetchone():
+            return jsonify({"error": "У вас нет прав администратора в этом чате"}), 403
+            
+        # Узнаем текущий статус ИИ в базе
+        cursor.execute('SELECT ai_enabled FROM chats_v2 WHERE chat_id = %s', (chat_id,))
+        res = cursor.fetchone()
+        current_status = res[0] if res else False
+        
+        # Меняем статус на противоположный
+        new_status = not current_status
+        cursor.execute('UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s', (new_status, chat_id))
+        conn.commit()
+        
+        response = jsonify({"status": "success", "ai_enabled": new_status})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        return response
+        
+    except Exception as e:
+        response = jsonify({"error": str(e)})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 500
+
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
