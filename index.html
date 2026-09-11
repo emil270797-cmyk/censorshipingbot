@@ -1,0 +1,27 @@
+<h2>Личный кабинет</h2>
+<p id="greeting">Загрузка данных...</p>
+
+<div class="card">
+    <h3>Мои чаты</h3>
+    <p>Здесь скоро появится список ваших групп для быстрой настройки.</p>
+    <button onclick="Telegram.WebApp.showAlert('Настройки скоро будут доступны!')">Управление</button>
+</div>
+
+<script>
+    // Инициализируем приложение
+    const tg = window.Telegram.WebApp;
+    
+    // Говорим приложению развернуться на весь экран
+    tg.expand();
+    
+    // Говорим Telegram, что наше приложение готово к отображению
+    tg.ready();
+
+    // Достаем имя пользователя прямо из Telegram
+    const greetingElement = document.getElementById('greeting');
+    if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        greetingElement.innerText = 'Добро пожаловать, ' + tg.initDataUnsafe.user.first_name + '!';
+    } else {
+        greetingElement.innerText = 'Добро пожаловать!';
+    }
+</script>
