@@ -248,14 +248,24 @@ async def cmd_start(m: Message):
     )
 
     # --- 2. Создаем прозрачные кнопки-меню ---
-    inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌟 Подключить Premium", callback_data="menu_premium")],
-        [
-            InlineKeyboardButton(text="📊 Статистика", callback_data="menu_stats"),
-            InlineKeyboardButton(text="⚙️ Статус", callback_data="menu_status")
-        ],
-        [InlineKeyboardButton(text="💬 Поддержка", url="https://t.me/alabr233")] # Не забудьте свой логин!
-    ])
+    # Ваша текущая клавиатура (примерно так она выглядит):
+inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    [
+        InlineKeyboardButton(text="🌟 Подключить Premium", callback_data="buy_premium")
+    ],
+    [
+        # --- ВОТ НАША НОВАЯ КНОПКА MINI APP ---
+        InlineKeyboardButton(
+            text="🎛 Открыть Личный Кабинет", 
+            web_app=WebAppInfo(url="https://core.telegram.org/bots/webapps") # Пока ставим заглушку
+        )
+        # --------------------------------------
+    ],
+    [
+        InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
+        InlineKeyboardButton(text="⚙️ Статус", callback_data="status")
+    ]
+])
 
     # --- 3. Отправляем скрытое сообщение для активации нижних кнопок ---
     await m.answer("⌨️ <i>Клавиатура быстрого доступа активирована!</i>", reply_markup=bottom_keyboard, parse_mode="HTML")
