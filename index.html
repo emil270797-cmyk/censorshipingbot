@@ -4,8 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Панель управления</title>
+    <!-- Подключаем библиотеку Telegram -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
+        /* Автоматическая адаптация под цвета Telegram (Темная/Светлая тема) */
         body {
             background-color: var(--tg-theme-bg-color, #ffffff);
             color: var(--tg-theme-text-color, #000000);
@@ -20,7 +22,10 @@
             margin-bottom: 16px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
-        h2, h3 { margin-top: 0; margin-bottom: 8px; }
+        h2, h3 { 
+            margin-top: 0; 
+            margin-bottom: 8px; 
+        }
         button {
             background-color: var(--tg-theme-button-color, #3390ec);
             color: var(--tg-theme-button-text-color, #ffffff);
@@ -34,7 +39,9 @@
             transition: opacity 0.2s;
             margin-top: 10px;
         }
-        button:active { opacity: 0.7; }
+        button:active { 
+            opacity: 0.7; 
+        }
         .status-badge {
             display: inline-block;
             padding: 4px 8px;
@@ -43,8 +50,14 @@
             font-weight: bold;
             margin-bottom: 10px;
         }
-        .status-pro { background-color: #ffd700; color: #000; }
-        .status-basic { background-color: #a9a9a9; color: #fff; }
+        .status-pro { 
+            background-color: #ffd700; 
+            color: #000; 
+        }
+        .status-basic { 
+            background-color: #a9a9a9; 
+            color: #fff; 
+        }
     </style>
 </head>
 <body>
@@ -52,7 +65,7 @@
     <h2>Личный кабинет</h2>
     <p id="greeting">Загрузка...</p>
 
-    <!-- Сюда скрипт будет загружать карточки чатов -->
+    <!-- Сюда скрипт динамически загрузит карточки чатов -->
     <div id="chats-container">
         <p>🔄 Получаем список чатов с сервера...</p>
     </div>
@@ -66,7 +79,7 @@
         const chatsContainer = document.getElementById('chats-container');
         let userId = null;
 
-        // Получаем ID пользователя из Telegram
+        // Получаем ID и имя пользователя из Telegram
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             greetingElement.innerHTML = 'Добро пожаловать, <b>' + tg.initDataUnsafe.user.first_name + '</b>!';
             userId = tg.initDataUnsafe.user.id;
@@ -75,39 +88,39 @@
             chatsContainer.innerHTML = '<p>❌ Ошибка: Не удалось получить данные пользователя.</p>';
         }
 
+        // Адрес вашего бэкенда на Render
+        const BACKEND_URL = 'https://censorshipingbot.onrender.com';
+
         if (userId) {
-            // ВНИМАНИЕ! Вставьте сюда вашу ссылку из Render (БЕЗ слэша на конце)
-            // Пример: const BACKEND_URL = 'https://censorshipbot.onrender.com';
-            const BACKEND_URL = 'https://censorshipingbot.onrender.com';
-            
-            // Делаем запрос к нашему Python-серверу
+            // Запрос списка чатов с сервера
             fetch(`${BACKEND_URL}/api/get_chats?user_id=${userId}`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.status === 'success') {
-                        chatsContainer.innerHTML = ''; // Очищаем надпись загрузки
+                        chatsContainer.innerHTML = ''; // Очищаем индикатор загрузки
                         
                         if (data.chats.length === 0) {
-                            chatsContainer.innerHTML = '<p>📭 У вас пока нет привязанных чатов.</p>';
+                            chatsContainer.innerHTML = '<p>📭 У вас пока нет привязанных чатов или прав администратора в них.</p>';
                             return;
                         }
                         
-                        // Рисуем карточку для каждого чата
+                        // Отрисовываем карточку для каждого чата
                         data.chats.forEach(chat => {
                             const card = document.createElement('div');
                             card.className = 'card';
                             
                             const statusHtml = chat.is_protected 
-                                ? '<span class="status-badge status-pro">🌟 ИИ-МОДЕРАТОР</span>' 
+                                ? '<span class="status-badge status-pro">🌟 ИИ-МОДЕРАТОР ВКЛЮЧЕН</span>' 
                                 : '<span class="status-badge status-basic">🌑 БАЗОВЫЙ ФИЛЬТР</span>';
                             
-                                                        card.innerHTML = `
+                            const btnText = chat.is_protected ? '🔴 Отключить ИИ' : '🟢 Включить ИИ';
+                            
+                            card.innerHTML = `
                                 <h3>💬 ${chat.chat_title}</h3>
                                 <div style="font-size: 12px; color: var(--tg-theme-hint-color, #707579); margin-bottom: 8px;">ID: ${chat.chat_id}</div>
                                 ${statusHtml}
-                                <button onclick="Telegram.WebApp.showAlert('Настройки для чата ${chat.chat_title} скоро появятся!')">⚙️ Настроить защиту</button>
+                                <button onclick="toggleAi('${chat.chat_id}')">${btnText}</button>
                             `;
-
                             chatsContainer.appendChild(card);
                         });
                     } else {
@@ -115,10 +128,38 @@
                     }
                 })
                 .catch(error => {
-                    chatsContainer.innerHTML = '<p>📡 Ошибка соединения с сервером Render. Возможно, сервер заснул, подождите минуту и перезапустите.</p>';
+                    chatsContainer.innerHTML = '<p>📡 Ошибка соединения с сервером Render. Возможно, сервер заснул, подождите минуту и перезагрузите.</p>';
                     console.error('Ошибка:', error);
                 });
+        }
+
+        // Функция отправки запроса на переключение ИИ-защиты
+        function toggleAi(chatId) {
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.impactOccurred('medium');
+            }
+
+            fetch(`${BACKEND_URL}/api/toggle_ai`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ chat_id: chatId, user_id: userId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    location.reload(); // Перезагружаем страницу для обновления статуса
+                } else {
+                    tg.showAlert('Ошибка: ' + (data.error || 'Не удалось изменить настройки'));
+                }
+            })
+            .catch(error => {
+                tg.showAlert('Ошибка соединения с сервером');
+                console.error('Ошибка:', error);
+            });
         }
     </script>
 </body>
 </html>
+
