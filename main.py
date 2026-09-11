@@ -299,9 +299,13 @@ async def cmd_start(m: Message):
 async def bot_added_to_chat(event: ChatMemberUpdated):
     if event.new_chat_member.status in ['member', 'administrator']:
         chat_id = event.chat.id
-        admin_id = event.from_user.id 
-        
+        admin_id = event.from_user.id
+        chat_title = event.chat.title or "Без названия"
         try:
+            # Сохраняем чат и его название в базу
+            add_chat(chat_id, chat_title)
+        
+            # Записываем связку с админом
             cursor.execute(
                 '''INSERT INTO chat_admins (chat_id, admin_id) 
                    VALUES (%s, %s) 
@@ -309,7 +313,7 @@ async def bot_added_to_chat(event: ChatMemberUpdated):
                 (chat_id, admin_id)
             )
             conn.commit()
-            print(f"✅ Авто-привязка: Чат {event.chat.title} закреплен за {admin_id}")
+            print(f"✅ Авто-привязка: Чат '{chat_title}' закреплен за {admin_id}")
         except Exception as e:
             print(f"❌ Ошибка авто-привязки: {e}")
 
@@ -647,12 +651,13 @@ async def punish(m: Message, reason: str):
 @dp.edited_message(F.chat.type.in_({"group", "supergroup"}))
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def handle_messages(m: Message):
-    if not m.text or m.is_automatic_forward:
-        return
-        
-    add_chat(m.chat.id)
+    if not m.text or m.is_automatic_forward: return
+
+    # Передаем ID и актуальное название чата
+    add_chat(m.chat.id, m.chat.title or "Без названия")
     text = m.text
-    
+
+    # 1. Иммунитет для администраторов
     if m.from_user:
         try:
             member = await bot.get_chat_member(m.chat.id, m.from_user.id)
@@ -660,6 +665,7 @@ async def handle_messages(m: Message):
                 return 
         except Exception:
             pass
+
             
     if is_ai(m.chat.id):
         has_link = False
