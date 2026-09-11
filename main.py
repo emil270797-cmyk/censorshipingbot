@@ -669,11 +669,48 @@ async def handle_messages(m: Message):
 
 
 # --- 8. ЗАПУСК БОТА И ВЕБ-СЕРВЕРА ---
+from flask import Flask, request, jsonify
+
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Бот-модератор работает!"
+
+# Создаем новую точку доступа (API) для Личного кабинета
+@app.route('/api/get_chats', methods=['GET'])
+def api_get_chats():
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({"error": "Не передан user_id"}), 400
+        
+    try:
+        # 1. Ищем чаты, где этот пользователь — администратор
+        cursor.execute('SELECT chat_id FROM chat_admins WHERE admin_id = %s', (user_id,))
+        chats = cursor.fetchall()
+        
+        chat_list = []
+        for row in chats:
+            c_id = row[0]
+            # 2. Проверяем, включен ли ИИ-модуль в этом конкретном чате
+            cursor.execute('SELECT ai_enabled FROM chats_v2 WHERE chat_id = %s', (c_id,))
+            res = cursor.fetchone()
+            ai_status = res[0] if res else False
+            
+            chat_list.append({
+                "chat_id": str(c_id), 
+                "is_protected": ai_status
+            })
+            
+        # 3. Формируем ответ и обязательно разрешаем запросы с других сайтов (CORS)
+        response = jsonify({"status": "success", "chats": chat_list})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+        
+    except Exception as e:
+        response = jsonify({"error": str(e)})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 500
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
