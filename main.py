@@ -242,7 +242,7 @@ async def cmd_start(m: Message):
         [
             InlineKeyboardButton(
                 text="🎛 Открыть Личный Кабинет", 
-                web_app=WebAppInfo(url="https://emil270797-cmyk.github.io/censorshipingbot/](https://emil270797-cmyk.github.io/censorshipingbot")
+                web_app=WebAppInfo(url="https://emil270797-cmyk.github.io/censorshipingbot/")
             )
         ],
         [
