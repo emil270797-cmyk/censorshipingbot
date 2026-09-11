@@ -4,10 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Панель управления</title>
-    <!-- Подключаем библиотеку Telegram -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        /* Автоматическая адаптация под цвета Telegram (Темная/Светлая тема) */
         body {
             background-color: var(--tg-theme-bg-color, #ffffff);
             color: var(--tg-theme-text-color, #000000);
@@ -22,24 +20,31 @@
             margin-bottom: 16px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
-        h2, h3 {
-            margin-top: 0;
-        }
+        h2, h3 { margin-top: 0; margin-bottom: 8px; }
         button {
             background-color: var(--tg-theme-button-color, #3390ec);
             color: var(--tg-theme-button-text-color, #ffffff);
             border: none;
             border-radius: 8px;
-            padding: 14px 20px;
+            padding: 12px 20px;
             width: 100%;
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
             transition: opacity 0.2s;
+            margin-top: 10px;
         }
-        button:active {
-            opacity: 0.7;
+        button:active { opacity: 0.7; }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 10px;
         }
+        .status-pro { background-color: #ffd700; color: #000; }
+        .status-basic { background-color: #a9a9a9; color: #fff; }
     </style>
 </head>
 <body>
@@ -47,28 +52,70 @@
     <h2>Личный кабинет</h2>
     <p id="greeting">Загрузка...</p>
 
-    <div class="card">
-        <h3>Мои чаты</h3>
-        <p>Здесь появится список ваших групп для настройки ИИ-модератора.</p>
-        <button onclick="Telegram.WebApp.showAlert('Настройки скоро будут доступны!')">Управление настройками</button>
+    <!-- Сюда скрипт будет загружать карточки чатов -->
+    <div id="chats-container">
+        <p>🔄 Получаем список чатов с сервера...</p>
     </div>
 
     <script>
-        // Инициализируем приложение
         const tg = window.Telegram.WebApp;
-        
-        // Говорим приложению развернуться на весь экран
         tg.expand();
-        
-        // Говорим Telegram, что наше приложение готово к отображению
         tg.ready();
 
-        // Достаем имя пользователя из Telegram и меняем текст
         const greetingElement = document.getElementById('greeting');
+        const chatsContainer = document.getElementById('chats-container');
+        let userId = null;
+
+        // Получаем ID пользователя из Telegram
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             greetingElement.innerHTML = 'Добро пожаловать, <b>' + tg.initDataUnsafe.user.first_name + '</b>!';
+            userId = tg.initDataUnsafe.user.id;
         } else {
             greetingElement.innerText = 'Добро пожаловать!';
+            chatsContainer.innerHTML = '<p>❌ Ошибка: Не удалось получить данные пользователя.</p>';
+        }
+
+        if (userId) {
+            // ВНИМАНИЕ! Вставьте сюда вашу ссылку из Render (БЕЗ слэша на конце)
+            // Пример: const BACKEND_URL = 'https://censorshipbot.onrender.com';
+            const BACKEND_URL = 'https://censorshipingbot.onrender.com';
+            
+            // Делаем запрос к нашему Python-серверу
+            fetch(`${BACKEND_URL}/api/get_chats?user_id=${userId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        chatsContainer.innerHTML = ''; // Очищаем надпись загрузки
+                        
+                        if (data.chats.length === 0) {
+                            chatsContainer.innerHTML = '<p>📭 У вас пока нет привязанных чатов.</p>';
+                            return;
+                        }
+                        
+                        // Рисуем карточку для каждого чата
+                        data.chats.forEach(chat => {
+                            const card = document.createElement('div');
+                            card.className = 'card';
+                            
+                            const statusHtml = chat.is_protected 
+                                ? '<span class="status-badge status-pro">🌟 ИИ-МОДЕРАТОР</span>' 
+                                : '<span class="status-badge status-basic">🌑 БАЗОВЫЙ ФИЛЬТР</span>';
+                            
+                            card.innerHTML = `
+                                <h3>Чат: ${chat.chat_id}</h3>
+                                ${statusHtml}
+                                <button onclick="Telegram.WebApp.showAlert('Здесь скоро появится меню настроек для чата ${chat.chat_id}!')">⚙️ Настроить защиту</button>
+                            `;
+                            chatsContainer.appendChild(card);
+                        });
+                    } else {
+                        chatsContainer.innerHTML = '<p>❌ Ошибка сервера: ' + data.error + '</p>';
+                    }
+                })
+                .catch(error => {
+                    chatsContainer.innerHTML = '<p>📡 Ошибка соединения с сервером Render. Возможно, сервер заснул, подождите минуту и перезапустите.</p>';
+                    console.error('Ошибка:', error);
+                });
         }
     </script>
 </body>
