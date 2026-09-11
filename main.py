@@ -225,6 +225,17 @@ async def ai_filter(author_name: str, text: str) -> bool:
 # --- 5. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ И АДМИНОВ ---
 @dp.message(Command("start"))
 async def cmd_start(m: Message):
+    # Проверяем только в личных сообщениях
+    if m.chat.type == "private":
+        admin_id = m.from_user.id
+        
+        # Ищем привязанные чаты владельца
+        cursor.execute('SELECT chat_id FROM chat_admins WHERE admin_id = %s', (admin_id,))
+        chats = cursor.fetchall()
+        
+        # Если чаты есть, можете, например, дописать их в ваш текст приветствия
+        # Или просто оставить вашу текущую логику со всеми красивыми кнопками!
+
     # --- 1. Создаем нижние "серые" кнопки ---
     bottom_keyboard = ReplyKeyboardMarkup(
         keyboard=[
