@@ -29,11 +29,28 @@ conn = psycopg2.connect(DB_URL)
 conn.autocommit = True
 cursor = conn.cursor()
 
+# --- Обновляем создание таблицы в начале файла ---
 cursor.execute('''CREATE TABLE IF NOT EXISTS chats_v2 (
     chat_id BIGINT PRIMARY KEY, 
     ai_enabled BOOLEAN DEFAULT FALSE,
-    premium_until DOUBLE PRECISION DEFAULT 0
+    premium_until DOUBLE PRECISION DEFAULT 0,
+    chat_title TEXT
 )''')
+
+# Безопасное добавление колонки, если таблица уже была создана раньше
+try:
+    cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS chat_title TEXT')
+except Exception:
+    pass
+
+def add_chat(chat_id, title="Без названия"):
+    cursor.execute('''
+        INSERT INTO chats_v2 (chat_id, ai_enabled, premium_until, chat_title) 
+        VALUES (%s, FALSE, 0, %s) 
+        ON CONFLICT (chat_id) 
+        DO UPDATE SET chat_title = EXCLUDED.chat_title WHERE EXCLUDED.chat_title IS NOT NULL
+    ''', (chat_id, title))
+
 
 cursor.execute('''CREATE TABLE IF NOT EXISTS warns (
     user_id BIGINT, 
@@ -677,7 +694,6 @@ app = Flask(__name__)
 def home():
     return "Бот-модератор работает!"
 
-# Создаем новую точку доступа (API) для Личного кабинета
 @app.route('/api/get_chats', methods=['GET'])
 def api_get_chats():
     user_id = request.args.get('user_id')
@@ -685,24 +701,24 @@ def api_get_chats():
         return jsonify({"error": "Не передан user_id"}), 400
         
     try:
-        # 1. Ищем чаты, где этот пользователь — администратор
-        cursor.execute('SELECT chat_id FROM chat_admins WHERE admin_id = %s', (user_id,))
+        # Достаем чаты через связку с админами и сразу забираем chat_title
+        cursor.execute('''
+            SELECT c.chat_id, c.ai_enabled, c.chat_title 
+            FROM chat_admins a 
+            JOIN chats_v2 c ON a.chat_id = c.chat_id 
+            WHERE a.admin_id = %s
+        ''', (user_id,))
         chats = cursor.fetchall()
         
         chat_list = []
         for row in chats:
-            c_id = row[0]
-            # 2. Проверяем, включен ли ИИ-модуль в этом конкретном чате
-            cursor.execute('SELECT ai_enabled FROM chats_v2 WHERE chat_id = %s', (c_id,))
-            res = cursor.fetchone()
-            ai_status = res[0] if res else False
-            
+            c_id, ai_status, c_title = row
             chat_list.append({
-                "chat_id": str(c_id), 
+                "chat_id": str(c_id),
+                "chat_title": c_title or f"Чат {c_id}",
                 "is_protected": ai_status
             })
             
-        # 3. Формируем ответ и обязательно разрешаем запросы с других сайтов (CORS)
         response = jsonify({"status": "success", "chats": chat_list})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response
@@ -722,4 +738,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
