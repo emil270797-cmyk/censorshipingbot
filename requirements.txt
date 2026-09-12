@@ -3,3 +3,4 @@ google-generativeai
 flask
 pymorphy3
 psycopg2-binary
+apscheduler
