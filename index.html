@@ -133,7 +133,7 @@
         </div>
     </div>
 
-    <script>
+        <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
         tg.ready();
@@ -142,8 +142,8 @@
         const chatsContainer = document.getElementById('chats-container');
         let userId = null;
 
-        // Вставьте сюда ваш TON-кошелек (тот же, что и в main.py)
-        const MY_WALLET = "UQBY8XHE4clVdbLnLmmbqw-tyQsg3O_I7k_ri21oBeVfsK3H"; 
+        // Вставьте сюда ваш TON-кошелек
+        const MY_WALLET = "UQXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"; 
 
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             greetingElement.innerHTML = 'Добро пожаловать, <b>' + tg.initDataUnsafe.user.first_name + '</b>!';
@@ -168,7 +168,6 @@
                         }
                         
                         for (const chat of data.chats) {
-                            // Запрашиваем статус подписки для каждого чата
                             let subData = { is_premium: false, days_left: 0 };
                             try {
                                 const subRes = await fetch(`${BACKEND_URL}/api/get_subscription?chat_id=${chat.chat_id}`);
@@ -184,8 +183,6 @@
                             card.className = 'card';
                             
                             let statusHtml = '';
-                            let btnHtml = '';
-                            
                             if (subData.is_premium) {
                                 statusHtml = `<span class="status-badge status-pro">🌟 PRO АКТИВЕН (осталось дней: ${subData.days_left})</span>`;
                             } else {
@@ -194,13 +191,13 @@
                             
                             const aiBtnText = chat.is_protected ? '🔴 Отключить ИИ' : '🟢 Включить ИИ';
                             
-                            
                             card.innerHTML = `
                                 <h3>💬 ${chat.chat_title}</h3>
                                 <div style="font-size: 12px; color: var(--tg-theme-hint-color, #707579); margin-bottom: 8px;">ID: ${chat.chat_id}</div>
                                 ${statusHtml}<br>
-                                <button onclick="toggleAi('{chat.chat_id}')">{aiBtnText}</button>
-                                <button class="btn-pro" onclick="openPaymentModal('${chat.chat_id}')">💎 Продлить / Купить PRO (1 TON)</button>;
+                                <button onclick="toggleAi('${chat.chat_id}')">${aiBtnText}</button>
+                                <button class="btn-pro" onclick="openPaymentModal('${chat.chat_id}')">💎 Продлить / Купить PRO (1 TON)</button>
+                            `;
                             chatsContainer.appendChild(card);
                         }
                     } else {
@@ -235,29 +232,27 @@
         }
 
         function openPaymentModal(chatId) {
-    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
-        window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
-    }
-    
-    document.getElementById('walletAddress').innerText = MY_WALLET;
-    document.getElementById('paymentMemo').innerText = `sub_${chatId}`;
-    
-    const amountNano = 1000000000; // 1 TON
-    const memoText = `sub_${chatId}`;
-    const tonkeeperUrl = `ton://transfer/${MY_WALLET}?amount=${amountNano}&text=${encodeURIComponent(memoText)}`;
-    
-    document.getElementById('openTonkeeperBtn').onclick = function() {
-        window.open(tonkeeperUrl, '_blank');
-    };
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+            
+            document.getElementById('walletAddress').innerText = MY_WALLET;
+            document.getElementById('paymentMemo').innerText = `sub_${chatId}`;
+            
+            const amountNano = 1000000000; // 1 TON
+            const memoText = `sub_${chatId}`;
+            const tonkeeperUrl = `ton://transfer/${MY_WALLET}?amount=${amountNano}&text=${encodeURIComponent(memoText)}`;
+            
+            document.getElementById('openTonkeeperBtn').onclick = function() {
+                window.open(tonkeeperUrl, '_blank');
+            };
 
-    document.getElementById('payModal').classList.add('active');
-}
+            document.getElementById('payModal').classList.add('active');
+        }
 
-function closeModal() {
-    document.getElementById('payModal').classList.remove('active');
-    location.reload();
-}
-
+        function closeModal() {
+            document.getElementById('payModal').classList.remove('active');
+            location.reload();
+        }
     </script>
+
 </body>
 </html>
