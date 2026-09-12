@@ -64,6 +64,10 @@
             align-items: center;
             padding: 20px;
             box-sizing: border-box;
+            z-index: 9999;
+        }
+        .modal.active {
+            display: flex !important;
         }
         .modal-content {
             background: var(--tg-theme-bg-color, #ffffff);
@@ -182,13 +186,13 @@
                             
                             const aiBtnText = chat.is_protected ? '🔴 Отключить ИИ' : '🟢 Включить ИИ';
                             
+                            
                             card.innerHTML = `
                                 <h3>💬 ${chat.chat_title}</h3>
                                 <div style="font-size: 12px; color: var(--tg-theme-hint-color, #707579); margin-bottom: 8px;">ID: ${chat.chat_id}</div>
                                 ${statusHtml}<br>
-                                <button onclick="toggleAi('${chat.chat_id}')">${aiBtnText}</button>
-                                <button class="btn-pro" onclick="openPaymentModal('${chat.chat_id}')">💎 Продлить / Купить PRO (1 TON)</button>
-                            `;
+                                <button onclick="toggleAi('{chat.chat_id}')">{aiBtnText}</button>
+                                <button class="btn-pro" onclick="openPaymentModal('${chat.chat_id}')">💎 Продлить / Купить PRO (1 TON)</button>;
                             chatsContainer.appendChild(card);
                         }
                     } else {
