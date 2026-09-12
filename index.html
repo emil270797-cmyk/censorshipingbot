@@ -37,6 +37,9 @@
             transition: opacity 0.2s;
             margin-top: 10px;
         }
+        button.btn-pro {
+            background-color: #f39c12;
+        }
         button:active { 
             opacity: 0.7; 
         }
@@ -48,13 +51,47 @@
             font-weight: bold;
             margin-bottom: 10px;
         }
-        .status-pro { 
-            background-color: #ffd700; 
-            color: #000; 
+        .status-pro { background-color: #ffd700; color: #000; }
+        .status-basic { background-color: #a9a9a9; color: #fff; }
+        
+        /* Модальное окно оплаты */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
         }
-        .status-basic { 
-            background-color: #a9a9a9; 
-            color: #fff; 
+        .modal-content {
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            padding: 20px;
+            border-radius: 14px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+        .wallet-box {
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            padding: 10px;
+            border-radius: 8px;
+            font-family: monospace;
+            word-break: break-all;
+            font-size: 13px;
+            margin: 10px 0;
+            user-select: all;
+        }
+        .memo-box {
+            background: #fff3cd;
+            color: #856404;
+            padding: 8px;
+            border-radius: 8px;
+            font-weight: bold;
+            margin: 10px 0;
         }
     </style>
 </head>
@@ -67,6 +104,23 @@
         <p>🔄 Получаем список чатов с сервера...</p>
     </div>
 
+    <!-- Модальное окно оплаты -->
+    <div id="payModal" class="modal">
+        <div class="modal-content">
+            <h3>💎 Оплата подписки PRO</h3>
+            <p>Переведите ровно <b>1 TON</b> на кошелек ниже. Обязательно укажите комментарий (мемо), иначе платеж не засчитается!</p>
+            
+            <p style="font-size: 14px; margin-bottom: 2px;">Адрес кошелька:</p>
+            <div class="wallet-box" id="walletAddress">UQYourWalletAddressHere...</div>
+            
+            <p style="font-size: 14px; margin-bottom: 2px;">Комментарий к переводу:</p>
+            <div class="memo-box" id="paymentMemo">sub_000000</div>
+            
+            <button id="openTonkeeperBtn">Открыть в Tonkeeper</button>
+            <button style="background-color: #e74c3c; margin-top: 8px;" onclick="closeModal()">Закрыть</button>
+        </div>
+    </div>
+
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
@@ -75,6 +129,9 @@
         const greetingElement = document.getElementById('greeting');
         const chatsContainer = document.getElementById('chats-container');
         let userId = null;
+
+        // Вставьте сюда ваш TON-кошелек (тот же, что и в main.py)
+        const MY_WALLET = "UQXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"; 
 
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
             greetingElement.innerHTML = 'Добро пожаловать, <b>' + tg.initDataUnsafe.user.first_name + '</b>!';
@@ -89,7 +146,7 @@
         if (userId) {
             fetch(`${BACKEND_URL}/api/get_chats?user_id=${userId}`)
                 .then(response => response.json())
-                .then(data => {
+                .then(async data => {
                     if (data.status === 'success') {
                         chatsContainer.innerHTML = '';
                         
@@ -98,24 +155,42 @@
                             return;
                         }
                         
-                        data.chats.forEach(chat => {
+                        for (const chat of data.chats) {
+                            // Запрашиваем статус подписки для каждого чата
+                            let subData = { is_premium: false, days_left: 0 };
+                            try {
+                                const subRes = await fetch(`${BACKEND_URL}/api/get_subscription?chat_id=${chat.chat_id}`);
+                                const subJson = await subRes.json();
+                                if (subJson.status === 'success') {
+                                    subData = subJson;
+                                }
+                            } catch (e) {
+                                console.error("Не удалось получить статус подписки", e);
+                            }
+
                             const card = document.createElement('div');
                             card.className = 'card';
                             
-                            const statusHtml = chat.is_protected 
-                                ? '<span class="status-badge status-pro">🌟 ИИ-МОДЕРАТОР ВКЛЮЧЕН</span>' 
-                                : '<span class="status-badge status-basic">🌑 БАЗОВЫЙ ФИЛЬТР</span>';
+                            let statusHtml = '';
+                            let btnHtml = '';
                             
-                            const btnText = chat.is_protected ? '🔴 Отключить ИИ' : '🟢 Включить ИИ';
+                            if (subData.is_premium) {
+                                statusHtml = `<span class="status-badge status-pro">🌟 PRO АКТИВЕН (осталось дней: ${subData.days_left})</span>`;
+                            } else {
+                                statusHtml = `<span class="status-badge status-basic">🌑 БАЗОВЫЙ РЕЖИМ</span>`;
+                            }
+                            
+                            const aiBtnText = chat.is_protected ? '🔴 Отключить ИИ' : '🟢 Включить ИИ';
                             
                             card.innerHTML = `
                                 <h3>💬 ${chat.chat_title}</h3>
                                 <div style="font-size: 12px; color: var(--tg-theme-hint-color, #707579); margin-bottom: 8px;">ID: ${chat.chat_id}</div>
-                                ${statusHtml}
-                                <button onclick="toggleAi('${chat.chat_id}')">${btnText}</button>
+                                ${statusHtml}<br>
+                                <button onclick="toggleAi('${chat.chat_id}')">${aiBtnText}</button>
+                                <button class="btn-pro" onclick="openPaymentModal('${chat.chat_id}')">💎 Продлить / Купить PRO (1 TON)</button>
                             `;
                             chatsContainer.appendChild(card);
-                        });
+                        }
                     } else {
                         chatsContainer.innerHTML = '<p>❌ Ошибка сервера: ' + data.error + '</p>';
                     }
@@ -127,25 +202,14 @@
         }
 
         function toggleAi(chatId) {
-            if (tg.HapticFeedback) {
-                tg.HapticFeedback.impactOccurred('medium');
-            }
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
 
             fetch(`${BACKEND_URL}/api/toggle_ai`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ chat_id: String(chatId), user_id: Number(userId) })
             })
-            .then(async response => {
-                const text = await response.text();
-                try {
-                    return JSON.parse(text);
-                } catch (e) {
-                    throw new Error("Ошибка сервера: " + text);
-                }
-            })
+            .then(res => res.json())
             .then(data => {
                 if (data.status === 'success') {
                     location.reload();
@@ -154,9 +218,37 @@
                 }
             })
             .catch(error => {
-                tg.showAlert(error.message);
-                console.error('Ошибка:', error);
+                tg.showAlert('Ошибка соединения');
             });
+        }
+
+        function openPaymentModal(chatId) {
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+            
+            document.getElementById('walletAddress').innerText = MY_WALLET;
+            document.getElementById('paymentMemo').innerText = `sub_${chatId}`;
+            
+            // Сумма 1 TON = 1000000000 нанотонов
+            const amountNano = 1000000000;
+            const memoText = `sub_${chatId}`;
+            
+            // Ссылка для открытия кошелька Tonkeeper напрямую
+            const tonkeeperUrl = `ton://transfer/${MY_WALLET}?amount=${amountNano}&text=${encodeURIComponent(memoText)}`;
+            
+            document.getElementById('openTonkeeperBtn వ్య').onclick = function() {
+                window.open(tonkeeperUrl, '_blank');
+            };
+            // Исправление onclick для кнопки Tonkeeper
+            document.getElementById('openTonkeeperBtn').onclick = function() {
+                window.open(tonkeeperUrl, '_blank');
+            };
+
+            document.getElementById('payModal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('payModal').style.display = 'none';
+            location.reload(); // Перезагружаем, вдруг платеж уже пришел!
         }
     </script>
 </body>
