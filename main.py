@@ -51,6 +51,27 @@ def add_chat(chat_id, title="Без названия"):
         DO UPDATE SET chat_title = EXCLUDED.chat_title WHERE EXCLUDED.chat_title IS NOT NULL
     ''', (chat_id, title))
 
+import time
+
+def check_chat_premium(chat_id):
+    """Проверяет, действует ли премиум-подписка для чата"""
+    cursor.execute('SELECT premium_until, ai_enabled FROM chats_v2 WHERE chat_id = %s', (chat_id,))
+    res = cursor.fetchone()
+    if not res:
+        return False
+    
+    premium_until, ai_enabled = res
+    current_time = time.time()
+    
+    # Если время подписки истекло, а ИИ был включен — выключаем его автоматически
+    if premium_until < current_time and ai_enabled:
+        cursor.execute('UPDATE chats_v2 SET ai_enabled = FALSE WHERE chat_id = %s', (chat_id,))
+        conn.commit()
+        return False
+        
+    return premium_until >= current_time
+
+
 
 
 
@@ -783,6 +804,52 @@ def api_toggle_ai():
         response = jsonify({"error": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+
+@app.route('/api/get_subscription', methods=['GET', 'OPTIONS'])
+def api_get_subscription():
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "GET")
+        return response
+
+    chat_id = request.args.get('chat_id')
+    if not chat_id:
+        res = jsonify({"error": "Не передан chat_id"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        return res, 400
+        
+    try:
+        cursor.execute('SELECT premium_until, ai_enabled FROM chats_v2 WHERE chat_id = %s', (chat_id,))
+        res_db = cursor.fetchone()
+        
+        if not res_db:
+            res = jsonify({"error": "Чат не найден"})
+            res.headers.add("Access-Control-Allow-Origin", "*")
+            return res, 404
+            
+        premium_until, ai_enabled = res_db
+        current_time = time.time()
+        is_active = premium_until >= current_time
+        
+        # Считаем оставшиеся дни (если активна)
+        days_left = max(0, int((premium_until - current_time) / 86400)) if is_active else 0
+        
+        response = jsonify({
+            "status": "success",
+            "is_premium": is_active,
+            "days_left": days_left,
+            "ai_enabled": ai_enabled
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+        
+    except Exception as e:
+        response = jsonify({"error": str(e)})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 500
+
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
