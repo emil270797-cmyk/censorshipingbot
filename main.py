@@ -52,6 +52,22 @@ except Exception as e:
     conn.rollback()
     print(f"Ошибка при добавлении колонки: {e}")
 
+# Создаем таблицу подписок владельцев, если её еще нет
+try:
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_subscriptions (
+            owner_id BIGINT PRIMARY KEY,
+            premium_until DOUBLE PRECISION DEFAULT 0,
+            slots INT DEFAULT 3
+        );
+    """)
+    conn.commit()
+    print("Таблица user_subscriptions успешно проверена/создана.")
+except Exception as e:
+    conn.rollback()
+    print(f"Ошибка при создании таблицы user_subscriptions: {e}")
+
+
 
 def add_chat(chat_id, title="Без названия"):
     cursor.execute('''
