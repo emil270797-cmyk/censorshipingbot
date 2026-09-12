@@ -799,7 +799,7 @@ async def check_ton_payments_loop():
                                     continue 
                                 
                                 value_nano = int(in_msg.get("value", 0))
-                                ton_amount = value_nano / 10**9 
+                                ton_amount = value_nano / 0.4*10**9 
                                 message_text = in_msg.get("message", "") or ""
                                 
                                 if message_text.startswith("sub_"):
