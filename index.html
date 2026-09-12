@@ -234,7 +234,20 @@
             
             // Ссылка для открытия кошелька Tonkeeper напрямую
             const tonkeeperUrl = `ton://transfer/${MY_WALLET}?amount=${amountNano}&text=${encodeURIComponent(memoText)}`;
-            
+
+            const tonBtn = document.getElementById('openTonkeeper');
+            of (tonBtn) {
+                tonBtn.onclick = function() {
+                    window.open(tonkeeperUrl, '_blank');
+                };
+            }
+
+            const modal = document.getElementById('payModal');
+            of (modal) {
+                modal.style.display = 'flex';
+            }
+        }
+        
             document.getElementById('openTonkeeperBtn వ్య').onclick = function() {
                 window.open(tonkeeperUrl, '_blank');
             };
