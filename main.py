@@ -662,6 +662,32 @@ async def process_successful_payment(message: Message):
             clean_payload = payload.replace("sub_stars_", "").replace("sub_recur_", "")
             chat_id = int(clean_payload)
             current_time = time.time()
+
+current_time = time.time()
+
+# 1. Проверяем, есть ли уже активная подписка у этого владельца
+cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+row = cursor.fetchone()
+
+if row and row[0] > current_time:
+    # Если подписка еще активна — продлеваем время с текущего окончания и ДОБАВЛЯЕМ +3 слота
+    new_premium_until = row[0] + (30 * 86400)
+    new_slots = row[1] + 3
+else:
+    # Если подписка истекла или первая покупка — считаем от текущего момента и даем 3 слота
+    new_premium_until = current_time + (30 * 86400)
+    new_slots = 3
+
+# Сохраняем в таблицу подписок владельца
+cursor.execute(
+    """INSERT INTO user_subscriptions (owner_id, premium_until, slots) 
+       VALUES (%s, %s, %s) 
+       ON CONFLICT (owner_id) 
+       DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots""",
+    (owner_id, new_premium_until, new_slots)
+)
+conn.commit()
+
             
             cursor.execute("SELECT premium_until FROM chats_v2 WHERE chat_id = %s", (chat_id,))
             res = cursor.fetchone()
