@@ -629,9 +629,12 @@ async def process_successful_payment(message: Message):
     payment = message.successful_payment
     payload = payment.invoice_payload
     
-    if payload.startswith("sub_stars_"):
+    # Проверяем и обычные звезды, и автопродление
+    if payload.startswith("sub_stars_") or payload.startswith("sub_recur_"):
         try:
-            chat_id = int(payload.replace("sub_stars_", ""))
+            # Извлекаем chat_id из payload (работает для обоих префиксов)
+            clean_payload = payload.replace("sub_stars_", "").replace("sub_recur_", "")
+            chat_id = int(clean_payload)
             current_time = time.time()
             
             cursor.execute("SELECT premium_until FROM chats_v2 WHERE chat_id = %s", (chat_id,))
@@ -639,8 +642,10 @@ async def process_successful_payment(message: Message):
             
             if res:
                 current_premium = res[0]
+                # Если подписка еще активна, прибавляем 30 дней к текущему сроку. 
+                # Если уже истекла — считаем от текущего момента.
                 base_time = max(current_premium, current_time)
-                new_premium_until = base_time + (30 * 86400) # Продлеваем на 30 дней
+                new_premium_until = base_time + (30 * 86400)
                 
                 cursor.execute(
                     "UPDATE chats_v2 SET premium_until = %s, ai_enabled = TRUE WHERE chat_id = %s",
@@ -648,9 +653,14 @@ async def process_successful_payment(message: Message):
                 )
                 conn.commit()
                 
-                await message.answer("🎉 Оплата через Telegram Stars прошла успешно! PRO-подписка активирована на 30 дней.")
+                # Проверяем, автопродление ли это или первая оплата
+                if payment.is_recurring:
+                    await message.answer("🔄 Автоматическое продление PRO-подписки успешно оплачено Stars! Подписка продлена еще на 30 дней.")
+                else:
+                    await message.answer("🎉 Оплата прошла успешно! PRO-подписка активирована на 30 дней с автопродлением.")
         except Exception as e:
-            print(f"⚠️ Ошибка активации Stars-подписки: {e}")
+            print(f"⚠️ Ошибка обработки платежа Stars: {e}")
+
 
 
 @dp.pre_checkout_query()
