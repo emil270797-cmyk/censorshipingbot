@@ -655,63 +655,43 @@ async def process_successful_payment(message: Message):
     payment = message.successful_payment
     payload = payment.invoice_payload
     
-    # Проверяем и обычные звезды, и автопродление
+    # Проверяем, что это наш платеж за подписку (обычные звезды или автопродление)
     if payload.startswith("sub_stars_") or payload.startswith("sub_recur_"):
         try:
-            # Извлекаем chat_id из payload (работает для обоих префиксов)
-            clean_payload = payload.replace("sub_stars_", "").replace("sub_recur_", "")
-            chat_id = int(clean_payload)
+            owner_id = message.from_user.id
             current_time = time.time()
-
-current_time = time.time()
-
-# 1. Проверяем, есть ли уже активная подписка у этого владельца
-cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
-row = cursor.fetchone()
-
-if row and row[0] > current_time:
-    # Если подписка еще активна — продлеваем время с текущего окончания и ДОБАВЛЯЕМ +3 слота
-    new_premium_until = row[0] + (30 * 86400)
-    new_slots = row[1] + 3
-else:
-    # Если подписка истекла или первая покупка — считаем от текущего момента и даем 3 слота
-    new_premium_until = current_time + (30 * 86400)
-    new_slots = 3
-
-# Сохраняем в таблицу подписок владельца
-cursor.execute(
-    """INSERT INTO user_subscriptions (owner_id, premium_until, slots) 
-       VALUES (%s, %s, %s) 
-       ON CONFLICT (owner_id) 
-       DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots""",
-    (owner_id, new_premium_until, new_slots)
-)
-conn.commit()
-
             
-            cursor.execute("SELECT premium_until FROM chats_v2 WHERE chat_id = %s", (chat_id,))
-            res = cursor.fetchone()
+            # 1. Проверяем, есть ли уже активная подписка у этого владельца
+            cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+            row = cursor.fetchone()
             
-            if res:
-                current_premium = res[0]
-                # Если подписка еще активна, прибавляем 30 дней к текущему сроку. 
-                # Если уже истекла — считаем от текущего момента.
-                base_time = max(current_premium, current_time)
-                new_premium_until = base_time + (30 * 86400)
+            if row and row[0] > current_time:
+                # Если подписка еще активна — продлеваем время и добавляем +3 слота
+                new_premium_until = row[0] + (30 * 86400)
+                new_slots = row[1] + 3
+            else:
+                # Если подписка истекла или первая покупка — даем 30 дней и 3 слота
+                new_premium_until = current_time + (30 * 86400)
+                new_slots = 3
+
+            # 2. Сохраняем в таблицу подписок владельца
+            cursor.execute(
+                """INSERT INTO user_subscriptions (owner_id, premium_until, slots) 
+                   VALUES (%s, %s, %s) 
+                   ON CONFLICT (owner_id) 
+                   DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots""",
+                (owner_id, new_premium_until, new_slots)
+            )
+            conn.commit()
+            
+            if payment.is_recurring:
+                await message.answer("🔄 Автоматическое продление успешно! Добавлено еще +3 слота и 30 дней PRO.")
+            else:
+                await message.answer("🎉 Пакет успешно куплен! Вам добавлено +3 слота для каналов, подписка активна на 30 дней.")
                 
-                cursor.execute(
-                    "UPDATE chats_v2 SET premium_until = %s, ai_enabled = TRUE WHERE chat_id = %s",
-                    (new_premium_until, chat_id)
-                )
-                conn.commit()
-                
-                # Проверяем, автопродление ли это или первая оплата
-                if payment.is_recurring:
-                    await message.answer("🔄 Автоматическое продление PRO-подписки успешно оплачено Stars! Подписка продлена еще на 30 дней.")
-                else:
-                    await message.answer("🎉 Оплата прошла успешно! PRO-подписка активирована на 30 дней с автопродлением.")
         except Exception as e:
-            print(f"⚠️ Ошибка обработки платежа Stars: {e}")
+            print(f"⚠️ Ошибка обработки успешного платежа: {e}")
+
 
 
 
