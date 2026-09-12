@@ -227,46 +227,29 @@
         }
 
         function openPaymentModal(chatId) {
-            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-            
-            document.getElementById('walletAddress').innerText = MY_WALLET;
-            document.getElementById('paymentMemo').innerText = `sub_${chatId}`;
-            
-            // Сумма 1 TON = 1000000000 нанотонов
-            const amountNano = 1000000000;
-            const memoText = `sub_${chatId}`;
-            
-            // Ссылка для открытия кошелька Tonkeeper напрямую
-            const tonkeeperUrl = `ton://transfer/${MY_WALLET}?amount=${amountNano}&text=${encodeURIComponent(memoText)}`;
+    if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
+        window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
+    }
+    
+    document.getElementById('walletAddress').innerText = MY_WALLET;
+    document.getElementById('paymentMemo').innerText = `sub_${chatId}`;
+    
+    const amountNano = 1000000000; // 1 TON
+    const memoText = `sub_${chatId}`;
+    const tonkeeperUrl = `ton://transfer/${MY_WALLET}?amount=${amountNano}&text=${encodeURIComponent(memoText)}`;
+    
+    document.getElementById('openTonkeeperBtn').onclick = function() {
+        window.open(tonkeeperUrl, '_blank');
+    };
 
-            const tonBtn = document.getElementById('openTonkeeper');
-            of (tonBtn) {
-                tonBtn.onclick = function() {
-                    window.open(tonkeeperUrl, '_blank');
-                };
-            }
+    document.getElementById('payModal').classList.add('active');
+}
 
-            const modal = document.getElementById('payModal');
-            of (modal) {
-                modal.style.display = 'flex';
-            }
-        }
-        
-            document.getElementById('openTonkeeperBtn వ్య').onclick = function() {
-                window.open(tonkeeperUrl, '_blank');
-            };
-            // Исправление onclick для кнопки Tonkeeper
-            document.getElementById('openTonkeeperBtn').onclick = function() {
-                window.open(tonkeeperUrl, '_blank');
-            };
+function closeModal() {
+    document.getElementById('payModal').classList.remove('active');
+    location.reload();
+}
 
-            document.getElementById('payModal').style.display = 'flex';
-        }
-
-        function closeModal() {
-            document.getElementById('payModal').style.display = 'none';
-            location.reload(); // Перезагружаем, вдруг платеж уже пришел!
-        }
     </script>
 </body>
 </html>
