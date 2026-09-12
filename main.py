@@ -614,7 +614,7 @@ async def cmd_give_premium(m: Message):
 
 @dp.message(Command("buy_premium"), F.chat.type.in_({"group", "supergroup"}))
 async def send_invoice(m: Message):
-    prices = [LabeledPrice(label="Premium AI Модератор", amount=50)] 
+    prices = [LabeledPrice(label="Premium AI Модератор", amount=100)] 
     await bot.send_invoice(
         chat_id=m.chat.id,
         title="Premium AI Модератор",
@@ -1075,7 +1075,7 @@ def api_create_stars_subscription():
             "description": "Ежемесячная подписка на ИИ-модератора. Отменить можно в любой момент.",
             "payload": f"sub_recur_{chat_id}",
             "currency": "XTR",
-            "prices": [{"label": "PRO Подписка / месяц", "amount": 150}],
+            "prices": [{"label": "PRO Подписка / месяц", "amount": 100}],
             # КЛЮЧЕВОЙ ПАРАМЕТР ДЛЯ АВТОПРОДЛЕНИЯ: период в секундах (30 дней = 2592000)
             "subscription_period": 2592000 
         }
@@ -1132,7 +1132,7 @@ def api_create_stars_invoice():
             "description": "Снятие лимитов и включение ИИ-модератора на 30 дней",
             "payload": f"sub_stars_{chat_id}",
             "currency": "XTR",
-            "prices": [{"label": "PRO Подписка на 30 дней", "amount": 150}]
+            "prices": [{"label": "PRO Подписка на 30 дней", "amount": 100}]
         }
         
         resp = requests.post(url, json=payload, timeout=10)
