@@ -203,6 +203,8 @@
     <button onclick="toggleAi('${chat.chat_id}')">${aiBtnText}</button>
     <button class="btn-pro" onclick="openPaymentModal('${chat.chat_id}')">💎 Купить PRO (TON)</button>
     <button class="btn-stars" onclick="payWithStars('${chat.chat_id}')">⭐ Купить PRO (150 Stars)</button>
+    <button class="btn-stars" onclick="payWithRecurringStars('${chat.chat_id}')">⭐ Подписка PRO (Автопродление)</button>
+
 `;
 
                             chatsContainer.appendChild(card);
@@ -259,6 +261,35 @@
             document.getElementById('payModal').classList.remove('active');
             location.reload();
         }
+
+        function payWithRecurringStars(chatId) {
+    if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    
+    fetch(`${BACKEND_URL}/api/create_stars_subscription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: String(chatId) })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success' && data.invoice_link) {
+            tg.openInvoice(data.invoice_link, function(status) {
+                if (status === 'paid') {
+                    tg.showAlert('Подписка с автопродлением оформлена!');
+                    location.reload();
+                }
+            });
+        } else {
+            tg.showAlert('Ошибка: ' + (data.error || 'Не удалось создать подписку'));
+        }
+    })
+    .catch(error => {
+        tg.showAlert('Ошибка соединения с сервером');
+    });
+}
+
+
+            
         function payWithStars(chatId) {
     if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
     
