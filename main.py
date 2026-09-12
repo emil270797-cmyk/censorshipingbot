@@ -957,40 +957,49 @@ def api_toggle_ai():
 
     data = request.json or {}
     chat_id = data.get('chat_id')
+    owner_id = data.get('owner_id') # Передаем owner_id из Mini App (Telegram ID текущего юзера)
     
-    if not chat_id:
-        res = jsonify({"status": "error", "error": "Не передан chat_id"})
+    if not chat_id or not owner_id:
+        res = jsonify({"status": "error", "error": "Не передан chat_id или owner_id"})
         res.headers.add("Access-Control-Allow-Origin", "*")
         return res, 400
 
     try:
         current_time = time.time()
         
-        # 1. Сначала проверяем текущий статус подписки чата
-        cursor.execute("SELECT ai_enabled, premium_until FROM chats_v2 WHERE chat_id = %s", (chat_id,))
-        row = cursor.fetchone()
+        # 1. Проверяем подписку владельца
+        cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+        sub_row = cursor.fetchone()
         
-        if not row:
-            res = jsonify({"status": "error", "error": "Чат не найден в базе"})
+        if not sub_row or sub_row[0] < current_time:
+            res = jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})
             res.headers.add("Access-Control-Allow-Origin", "*")
-            return res, 404
+            return res, 400
             
-        current_ai_status, premium_until = row
+        premium_until, max_slots = sub_row
         
-        # Если ИИ выключен, и пользователь пытается его включить -> проверяем PRO-подписку
+        # 2. Проверяем текущий статус конкретного чата
+        cursor.execute("SELECT ai_enabled FROM chats_v2 WHERE chat_id = %s", (chat_id,))
+        chat_row = cursor.fetchone()
+        current_ai_status = chat_row[0] if chat_row else False
+        
+        # Если пытаемся включить ИИ -> проверяем лимит занятых слотов
         if not current_ai_status:
-            if premium_until < current_time:
-                # Подписка истекла или не оформлялась!
+            # Считаем, сколько чатов этот owner уже включил (исключая текущий)
+            cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
+            active_chats_count = cursor.fetchone()[0]
+            
+            if active_chats_count >= max_slots:
                 res = jsonify({
                     "status": "error", 
-                    "error": "Сначала активируйте PRO-подписку"
+                    "error": f"Лимит исчерпан ({active_chats_count}/{max_slots} чатов). Купите дополнительный пакет (+3 чата)."
                 })
                 res.headers.add("Access-Control-Allow-Origin", "*")
                 return res, 400
 
-        # 2. Если подписка есть (или мы просто выключаем ИИ) — меняем статус на противоположный
+        # 3. Переключаем статус
         new_ai_status = not current_ai_status
-        cursor.execute("UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s", (new_ai_status, chat_id))
+        cursor.execute("UPDATE chats_v2 SET ai_enabled = %s, owner_id = %s WHERE chat_id = %s", (new_ai_status, owner_id, chat_id))
         conn.commit()
 
         response = jsonify({"status": "success", "ai_enabled": new_ai_status})
@@ -1001,6 +1010,7 @@ def api_toggle_ai():
         response = jsonify({"status": "error", "error": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+
 
 
 @app.route('/api/get_subscription', methods=['GET', 'OPTIONS'])
