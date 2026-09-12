@@ -976,6 +976,57 @@ def api_get_subscription():
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
 
+@app.route('/api/create_stars_subscription', methods=['POST', 'OPTIONS'])
+def api_create_stars_subscription():
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "POST")
+        return response
+
+    data = request.json or {}
+    chat_id = data.get('chat_id')
+    
+    if not chat_id:
+        res = jsonify({"status": "error", "error": "Не передан chat_id"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        return res, 400
+
+    try:
+        import os
+        token = os.getenv("BOT_TOKEN") # Или ваш токен
+        
+        url = f"https://api.telegram.org/bot{token}/createInvoiceLink"
+        payload = {
+            "title": "PRO Подписка (Автопродление)",
+            "description": "Ежемесячная подписка на ИИ-модератора. Отменить можно в любой момент.",
+            "payload": f"sub_recur_{chat_id}",
+            "currency": "XTR",
+            "prices": [{"label": "PRO Подписка / месяц", "amount": 150}],
+            # КЛЮЧЕВОЙ ПАРАМЕТР ДЛЯ АВТОПРОДЛЕНИЯ: период в секундах (30 дней = 2592000)
+            "subscription_period": 2592000 
+        }
+        
+        resp = requests.post(url, json=payload, timeout=10)
+        res_data = resp.json()
+        
+        if res_data.get("ok"):
+            invoice_link = res_data["result"]
+            response = jsonify({"status": "success", "invoice_link": invoice_link})
+        else:
+            error_desc = res_data.get("description", "Unknown error")
+            response = jsonify({"status": "error", "error": error_desc}), 400
+            
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+        
+    except Exception as e:
+        response = jsonify({"status": "error", "error": str(e)})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 500
+
+
 from aiogram.types import LabeledPrice
 
 import requests
