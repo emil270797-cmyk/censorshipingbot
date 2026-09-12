@@ -43,6 +43,16 @@ try:
 except Exception:
     pass
 
+# Автоматическое добавление колонки owner_id, если её еще нет
+try:
+    cursor.execute("ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS owner_id BIGINT;")
+    conn.commit()
+    print("Колонка owner_id успешно проверена/добавлена.")
+except Exception as e:
+    conn.rollback()
+    print(f"Ошибка при добавлении колонки: {e}")
+
+
 def add_chat(chat_id, title="Без названия"):
     cursor.execute('''
         INSERT INTO chats_v2 (chat_id, ai_enabled, premium_until, chat_title) 
