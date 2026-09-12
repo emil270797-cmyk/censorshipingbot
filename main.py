@@ -963,6 +963,8 @@ def api_get_subscription():
 
 from aiogram.types import LabeledPrice
 
+import requests
+
 @app.route('/api/create_stars_invoice', methods=['POST', 'OPTIONS'])
 def api_create_stars_invoice():
     if request.method == 'OPTIONS':
@@ -974,44 +976,45 @@ def api_create_stars_invoice():
 
     data = request.json or {}
     chat_id = data.get('chat_id')
-    user_id = data.get('user_id')
     
-    if not chat_id or not user_id:
-        res = jsonify({"error": "Не передан chat_id или user_id"})
+    if not chat_id:
+        res = jsonify({"error": "Не передан chat_id"})
         res.headers.add("Access-Control-Allow-Origin", "*")
         return res, 400
 
     try:
-        # Стоимость подписки в Stars (например, 150 Stars за 30 дней)
-        prices = [LabeledPrice(label="PRO Подписка на 30 дней", amount=150)]
+        # Получаем TOKEN вашего бота из переменных окружения или константы
+        import os
+        token = os.getenv("BOT_TOKEN") # Или подставьте ваш токен строкой, если он прописан напрямую
         
-        # Создаем платежную ссылку через синхронный вызов бота (или через asyncio в зависимости от вашей настройки)
-        # Так как Flask синхронный, вызовем создание через asyncio.run_coroutine_threadsafe или прямой метод
-        import asyncio
+        # Формируем запрос напрямую к Telegram API (создание инвойс-ссылки)
+        url = f"https://api.telegram.org/bot{token}/createInvoiceLink"
+        payload = {
+            "title": "PRO Подписка для чата",
+            "description": "Снятие лимитов и включение ИИ-модератора на 30 дней",
+            "payload": f"sub_stars_{chat_id}",
+            "currency": "XTR",
+            "prices": [{"label": "PRO Подписка на 30 дней", "amount": 150}]
+        }
         
-        async def create_link():
-            return await bot.create_invoice_link(
-                title="PRO Подписка для чата",
-                description="Снятие лимитов и включение ИИ-модератора на 30 дней",
-                payload=f"sub_stars_{chat_id}",
-                currency="XTR",  # Валюта Telegram Stars
-                prices=prices
-            )
-
-        # Запускаем в текущем event loop бота
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        invoice_link = loop.run_until_complete(create_link())
-        loop.close()
-
-        response = jsonify({"status": "success", "invoice_link": invoice_link})
+        resp = requests.post(url, json=payload, timeout=10)
+        res_data = resp.json()
+        
+        if res_data.get("ok"):
+            invoice_link = res_data["result"]
+            response = jsonify({"status": "success", "invoice_link": invoice_link})
+        else:
+            error_desc = res_data.get("description", "Unknown error")
+            response = jsonify({"status": "error", "error": error_desc}), 400
+            
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response
         
     except Exception as e:
-        response = jsonify({"error": str(e)})
+        response = jsonify({"status": "error", "error": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+
 
 
 def run_web():
