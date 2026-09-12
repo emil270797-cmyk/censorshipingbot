@@ -885,36 +885,51 @@ def api_toggle_ai():
 
     data = request.json or {}
     chat_id = data.get('chat_id')
-    user_id = data.get('user_id')
     
-    if not chat_id or not user_id:
-        res = jsonify({"error": "Не переданы chat_id или user_id"})
+    if not chat_id:
+        res = jsonify({"status": "error", "error": "Не передан chat_id"})
         res.headers.add("Access-Control-Allow-Origin", "*")
         return res, 400
-        
+
     try:
-        cursor.execute('SELECT 1 FROM chat_admins WHERE chat_id = %s AND admin_id = %s', (chat_id, user_id))
-        if not cursor.fetchone():
-            res = jsonify({"error": "У вас нет прав администратора в этом чате"})
+        current_time = time.time()
+        
+        # 1. Сначала проверяем текущий статус подписки чата
+        cursor.execute("SELECT ai_enabled, premium_until FROM chats_v2 WHERE chat_id = %s", (chat_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            res = jsonify({"status": "error", "error": "Чат не найден в базе"})
             res.headers.add("Access-Control-Allow-Origin", "*")
-            return res, 403
+            return res, 404
             
-        cursor.execute('SELECT ai_enabled FROM chats_v2 WHERE chat_id = %s', (chat_id,))
-        res_db = cursor.fetchone()
-        current_status = res_db[0] if res_db else False
+        current_ai_status, premium_until = row
         
-        new_status = not current_status
-        cursor.execute('UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s', (new_status, chat_id))
+        # Если ИИ выключен, и пользователь пытается его включить -> проверяем PRO-подписку
+        if not current_ai_status:
+            if premium_until < current_time:
+                # Подписка истекла или не оформлялась!
+                res = jsonify({
+                    "status": "error", 
+                    "error": "Сначала активируйте PRO-подписку"
+                })
+                res.headers.add("Access-Control-Allow-Origin", "*")
+                return res, 400
+
+        # 2. Если подписка есть (или мы просто выключаем ИИ) — меняем статус на противоположный
+        new_ai_status = not current_ai_status
+        cursor.execute("UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s", (new_ai_status, chat_id))
         conn.commit()
-        
-        response = jsonify({"status": "success", "ai_enabled": new_status})
+
+        response = jsonify({"status": "success", "ai_enabled": new_ai_status})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response
-        
+
     except Exception as e:
-        response = jsonify({"error": str(e)})
+        response = jsonify({"status": "error", "error": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+
 
 @app.route('/api/get_subscription', methods=['GET', 'OPTIONS'])
 def api_get_subscription():
