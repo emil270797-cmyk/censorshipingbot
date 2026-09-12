@@ -830,6 +830,58 @@ async def check_ton_payments_loop():
             
         await asyncio.sleep(60) 
 
+from apscheduler.schedulers.background import BackgroundScheduler
+import time
+
+def check_expiring_subscriptions():
+    """Фоновая задача: проверяет подписки, которые истекают через 24 часа, и шлет уведомления в ЛС."""
+    try:
+        current_time = time.time()
+        one_day_later = current_time + 86400 # 24 часа в секундах
+        
+        # Ищем чаты, у которых PRO истекает в диапазоне от «сейчас» до «через 24 часа»,
+        # и которым мы еще не отправляли предупреждение (или проверяем по логике)
+        cursor.execute(
+            """SELECT chat_id, chat_title, owner_id, premium_until 
+               FROM chats_v2 
+               WHERE premium_until > %s AND premium_until <= %s""",
+            (current_time, one_day_later)
+        )
+        expiring_chats = cursor.fetchall()
+        
+        # Импортируем asyncio, чтобы запустить асинхронную отправку сообщения через бота из синхронной задачи
+        import asyncio
+        
+        for chat in expiring_chats:
+            chat_id, chat_title, owner_id, premium_until = chat
+            if not owner_id:
+                continue
+                
+            hours_left = int((premium_until - current_time) / 3600)
+            
+            message_text = (
+                f"⚠️ **Внимание!** PRO-подписка для чата *«{chat_title}»* истекает через {hours_left} ч.\n\n"
+                f"Чтобы ИИ-модератор не отключился, продлите подписку в личном кабинете Mini App!"
+            )
+            
+            # Отправляем сообщение владельцу чата в ЛС
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(bot.send_message(owner_id, message_text, parse_mode="Markdown"))
+                loop.close()
+            except Exception as send_err:
+                print(f"Не удалось отправить уведомление пользователю {owner_id}: {send_err}")
+                
+    except Exception as e:
+        print(f"Ошибка в фоновой задаче проверки подписок: {e}")
+
+# Запускаем планировщик
+scheduler = BackgroundScheduler()
+# Настраиваем запуск проверки каждый час (или раз в сутки: hours=24)
+scheduler.add_job(check_expiring_subscriptions, 'interval', hours=1)
+scheduler.start()
+
 
 
 # --- 8. ЗАПУСК БОТА И ВЕБ-СЕРВЕРА ---
