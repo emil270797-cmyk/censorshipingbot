@@ -615,6 +615,44 @@ async def send_invoice(m: Message):
         prices=prices
     )
 
+from aiogram.types import LabeledPrice, PreCheckoutQuery
+
+# --- ХЕНДЛЕРЫ ОПЛАТЫ TELEGRAM STARS ---
+
+@dp.pre_checkout_query()
+async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
+    # Обязательно подтверждаем пре-чеккаут, чтобы транзакция пошла дальше
+    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+@dp.message(F.successful_payment)
+async def process_successful_payment(message: Message):
+    payment = message.successful_payment
+    payload = payment.invoice_payload
+    
+    if payload.startswith("sub_stars_"):
+        try:
+            chat_id = int(payload.replace("sub_stars_", ""))
+            current_time = time.time()
+            
+            cursor.execute("SELECT premium_until FROM chats_v2 WHERE chat_id = %s", (chat_id,))
+            res = cursor.fetchone()
+            
+            if res:
+                current_premium = res[0]
+                base_time = max(current_premium, current_time)
+                new_premium_until = base_time + (30 * 86400) # Продлеваем на 30 дней
+                
+                cursor.execute(
+                    "UPDATE chats_v2 SET premium_until = %s, ai_enabled = TRUE WHERE chat_id = %s",
+                    (new_premium_until, chat_id)
+                )
+                conn.commit()
+                
+                await message.answer("🎉 Оплата через Telegram Stars прошла успешно! PRO-подписка активирована на 30 дней.")
+        except Exception as e:
+            print(f"⚠️ Ошибка активации Stars-подписки: {e}")
+
+
 @dp.pre_checkout_query()
 async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
     await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
@@ -915,6 +953,58 @@ def api_get_subscription():
             "days_left": days_left,
             "ai_enabled": ai_enabled
         })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+        
+    except Exception as e:
+        response = jsonify({"error": str(e)})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 500
+
+from aiogram.types import LabeledPrice
+
+@app.route('/api/create_stars_invoice', methods=['POST', 'OPTIONS'])
+def api_create_stars_invoice():
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "POST")
+        return response
+
+    data = request.json or {}
+    chat_id = data.get('chat_id')
+    user_id = data.get('user_id')
+    
+    if not chat_id or not user_id:
+        res = jsonify({"error": "Не передан chat_id или user_id"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        return res, 400
+
+    try:
+        # Стоимость подписки в Stars (например, 150 Stars за 30 дней)
+        prices = [LabeledPrice(label="PRO Подписка на 30 дней", amount=150)]
+        
+        # Создаем платежную ссылку через синхронный вызов бота (или через asyncio в зависимости от вашей настройки)
+        # Так как Flask синхронный, вызовем создание через asyncio.run_coroutine_threadsafe или прямой метод
+        import asyncio
+        
+        async def create_link():
+            return await bot.create_invoice_link(
+                title="PRO Подписка для чата",
+                description="Снятие лимитов и включение ИИ-модератора на 30 дней",
+                payload=f"sub_stars_{chat_id}",
+                currency="XTR",  # Валюта Telegram Stars
+                prices=prices
+            )
+
+        # Запускаем в текущем event loop бота
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        invoice_link = loop.run_until_complete(create_link())
+        loop.close()
+
+        response = jsonify({"status": "success", "invoice_link": invoice_link})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response
         
