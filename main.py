@@ -932,41 +932,40 @@ def api_get_chats():
         response = jsonify({'status': 'ok'})
         response.headers.add("Access-Control-Allow-Origin", "*")
         response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        response.headers.add("Access-Control-Allow-Methods", "GET")
+        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
         return response
 
-    user_id = request.args.get('user_id')
-    if not user_id:
-        res = jsonify({"error": "Не передан user_id"})
+    owner_id = request.args.get('owner_id')
+    if not owner_id:
+        res = jsonify({"status": "error", "error": "No owner_id provided"})
         res.headers.add("Access-Control-Allow-Origin", "*")
         return res, 400
-        
+
     try:
-        cursor.execute('''
-            SELECT c.chat_id, c.ai_enabled, c.chat_title 
-            FROM chat_admins a 
-            JOIN chats_v2 c ON a.chat_id = c.chat_id 
-            WHERE a.admin_id = %s
-        ''', (user_id,))
-        chats = cursor.fetchall()
+        # Выбираем чаты, которые принадлежат этому владельцу
+        cursor.execute("SELECT chat_id, chat_title, ai_enabled FROM chats_v2 WHERE owner_id = %s", (owner_id,))
+        rows = cursor.fetchall()
         
-        chat_list = []
-        for row in chats:
-            c_id, ai_status, c_title = row
-            chat_list.append({
-                "chat_id": str(c_id),
-                "chat_title": c_title or f"Чат {c_id}",
-                "is_protected": ai_status
+        chats_list = []
+        for row in rows:
+            chats_list.append({
+                "chat_id": str(row[0]),
+                "chat_title": row[1] or "Без названия",
+                "ai_enabled": bool(row[2])
             })
-            
-        response = jsonify({"status": "success", "chats": chat_list})
+
+        response = jsonify({
+            "status": "success", 
+            "chats": chats_list
+        })
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response
-        
+
     except Exception as e:
-        response = jsonify({"error": str(e)})
+        response = jsonify({"status": "error", "error": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+
 
 @app.route('/api/get_user_sub', methods=['GET', 'OPTIONS'])
 def api_get_user_sub():
