@@ -1048,7 +1048,11 @@ def api_toggle_ai():
     chat_id = data.get('chat_id')
     owner_id = data.get('owner_id') # Передаем owner_id из Mini App (Telegram ID текущего юзера)
     
+    # 🔍 Отладка: видим, что именно прилетело от мини-приложения
+    print(f"🔄 Получен запрос toggle_ai: chat_id={chat_id}, owner_id={owner_id}")
+
     if not chat_id or not owner_id:
+        print(f"⚠️ Ошибка: не передан chat_id или owner_id (chat_id={chat_id}, owner_id={owner_id})")
         res = jsonify({"status": "error", "error": "Не передан chat_id или owner_id"})
         res.headers.add("Access-Control-Allow-Origin", "*")
         return res, 400
@@ -1061,6 +1065,7 @@ def api_toggle_ai():
         sub_row = cursor.fetchone()
         
         if not sub_row or sub_row[0] < current_time:
+            print(f"⚠️ Ошибка лимита: у пользователя {owner_id} нет активной PRO-подписки")
             res = jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})
             res.headers.add("Access-Control-Allow-Origin", "*")
             return res, 400
@@ -1079,6 +1084,7 @@ def api_toggle_ai():
             active_chats_count = cursor.fetchone()[0]
             
             if active_chats_count >= max_slots:
+                print(f"⚠️ Ошибка слотов: у пользователя {owner_id} исчерпаны слоты ({active_chats_count}/{max_slots})")
                 res = jsonify({
                     "status": "error", 
                     "error": f"Лимит исчерпан ({active_chats_count}/{max_slots} чатов). Купите дополнительный пакет (+3 чата)."
@@ -1091,14 +1097,18 @@ def api_toggle_ai():
         cursor.execute("UPDATE chats_v2 SET ai_enabled = %s, owner_id = %s WHERE chat_id = %s", (new_ai_status, owner_id, chat_id))
         conn.commit()
 
+        print(f"✅ Успех: ИИ для чата {chat_id} переключен в состояние {new_ai_status}")
         response = jsonify({"status": "success", "ai_enabled": new_ai_status})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response
 
     except Exception as e:
+        # ❌ Поймали непредвиденную ошибку базы данных или кода
+        print(f"❌ Критическая ошибка в /api/toggle_ai: {e}")
         response = jsonify({"status": "error", "error": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
+
 
 
 
