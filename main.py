@@ -67,6 +67,14 @@ except Exception as e:
     conn.rollback()
     print(f"Ошибка при создании таблицы user_subscriptions: {e}")
 
+try:
+    cursor.execute("UPDATE chats_v2 SET owner_id = 354584527 WHERE owner_id IS NULL;")
+    conn.commit()
+    print("Старые чаты успешно привязаны к владельцу!")
+except Exception as e:
+    conn.rollback()
+    print(f"Ошибка при привязке чатов: {e}")
+
 
 
 def add_chat(chat_id, title="Без названия"):
