@@ -1044,11 +1044,11 @@ def api_toggle_ai():
         response.headers.add("Access-Control-Allow-Methods", "POST")
         return response
 
-    data = request.json or {}
+    # Безопасное чтение JSON без авто-краша со стороны Flask
+    data = request.get_json(silent=True) or {}
     chat_id = data.get('chat_id')
-    owner_id = data.get('owner_id') # Передаем owner_id из Mini App (Telegram ID текущего юзера)
+    owner_id = data.get('owner_id')
     
-    # 🔍 Отладка: видим, что именно прилетело от мини-приложения
     print(f"🔄 Получен запрос toggle_ai: chat_id={chat_id}, owner_id={owner_id}")
 
     if not chat_id or not owner_id:
@@ -1058,6 +1058,8 @@ def api_toggle_ai():
         return res, 400
 
     try:
+        # ... дальше вся ваша остальная логика проверки подписки и переключения ...
+
         current_time = time.time()
         
         # 1. Проверяем подписку владельца
