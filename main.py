@@ -968,6 +968,57 @@ def api_get_chats():
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response, 500
 
+@app.route('/api/get_user_sub', methods=['GET', 'OPTIONS'])
+def api_get_user_sub():
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
+        return response
+
+    owner_id = request.args.get('owner_id')
+    if not owner_id:
+        res = jsonify({"status": "error", "error": "No owner_id"})
+        res.headers.add("Access-Control-Allow-Origin", "*")
+        return res, 400
+
+    try:
+        current_time = time.time()
+        cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+        sub_row = cursor.fetchone()
+        
+        is_active = False
+        max_slots = 3  # Дефолтный лимит, если записи еще нет
+        expires_at = "Никогда"
+        
+        if sub_row:
+            premium_until, max_slots = sub_row
+            if premium_until > current_time:
+                is_active = True
+                import datetime
+                expires_at = datetime.datetime.fromtimestamp(premium_until).strftime('%Y-%m-%d %H:%M')
+
+        # Считаем, сколько чатов этот владелец уже подключил
+        cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
+        active_chats = cursor.fetchone()[0]
+
+        response = jsonify({
+            "status": "success",
+            "is_active": is_active,
+            "expires_at": expires_at,
+            "max_slots": max_slots,
+            "active_chats": active_chats
+        })
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+
+    except Exception as e:
+        response = jsonify({"status": "error", "error": str(e)})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 500
+
+
 @app.route('/api/toggle_ai', methods=['POST', 'OPTIONS'])
 def api_toggle_ai():
     if request.method == 'OPTIONS':
