@@ -1058,54 +1058,48 @@ def api_toggle_ai():
         return res, 400
 
     try:
-        # ... дальше вся ваша остальная логика проверки подписки и переключения ...
-
         current_time = time.time()
         
-        # 1. Проверяем подписку владельца
-        cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
-        sub_row = cursor.fetchone()
-        
-        if not sub_row or sub_row[0] < current_time:
-            print(f"⚠️ Ошибка лимита: у пользователя {owner_id} нет активной PRO-подписки")
-            res = jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})
-            res.headers.add("Access-Control-Allow-Origin", "*")
-            return res, 400
-            
-        premium_until, max_slots = sub_row
-        
-        # 2. Проверяем текущий статус конкретного чата
+        # 1. Сначала узнаем текущий статус чата (включен или выключен)
         cursor.execute("SELECT ai_enabled FROM chats_v2 WHERE chat_id = %s", (chat_id,))
         chat_row = cursor.fetchone()
         current_ai_status = chat_row[0] if chat_row else False
         
-        # Если пытаемся включить ИИ -> проверяем лимит занятых слотов
+        # 2. Если ИИ сейчас ВЫКЛЮЧЕН и мы пытаемся его ВКЛЮЧИТЬ -> проверяем подписку и лимиты
         if not current_ai_status:
-            # Считаем, сколько чатов этот owner уже включил (исключая текущий)
+            # Проверяем наличие активной подписки
+            cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+            sub_row = cursor.fetchone()
+            
+            if not sub_row or sub_row[0] < current_time:
+                res = jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})
+                res.headers.add("Access-Control-Allow-Origin", "*")
+                return res, 400
+                
+            max_slots = sub_row[1]
+            
+            # Проверяем лимит занятых слотов
             cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
             active_chats_count = cursor.fetchone()[0]
             
             if active_chats_count >= max_slots:
-                print(f"⚠️ Ошибка слотов: у пользователя {owner_id} исчерпаны слоты ({active_chats_count}/{max_slots})")
                 res = jsonify({
                     "status": "error", 
-                    "error": f"Лимит исчерпан ({active_chats_count}/{max_slots} чатов). Купите дополнительный пакет (+3 чата)."
+                    "error": f"Лимит исчерпан ({active_chats_count}/{max_slots} чатов). Купите дополнительный пакет."
                 })
                 res.headers.add("Access-Control-Allow-Origin", "*")
                 return res, 400
 
-        # 3. Переключаем статус
+        # 3. Переключаем статус (если мы дошли сюда, значит либо мы ВЫКЛЮЧАЕМ ИИ, либо все проверки на включение пройдены)
         new_ai_status = not current_ai_status
         cursor.execute("UPDATE chats_v2 SET ai_enabled = %s, owner_id = %s WHERE chat_id = %s", (new_ai_status, owner_id, chat_id))
         conn.commit()
 
-        print(f"✅ Успех: ИИ для чата {chat_id} переключен в состояние {new_ai_status}")
         response = jsonify({"status": "success", "ai_enabled": new_ai_status})
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response
 
     except Exception as e:
-        # ❌ Поймали непредвиденную ошибку базы данных или кода
         print(f"❌ Критическая ошибка в /api/toggle_ai: {e}")
         response = jsonify({"status": "error", "error": str(e)})
         response.headers.add("Access-Control-Allow-Origin", "*")
