@@ -359,24 +359,33 @@ async def cmd_start(m: Message):
 @dp.my_chat_member()
 async def bot_added_to_chat(event: ChatMemberUpdated):
     if event.new_chat_member.status in ['member', 'administrator']:
-        chat_id = event.chat.id
+        chat_id = str(event.chat.id)
         admin_id = event.from_user.id
         chat_title = event.chat.title or "Без названия"
         try:
-            # Сохраняем чат и его название в базу
-            add_chat(chat_id, chat_title)
-        
-            # Записываем связку с админом
+            # 1. Сохраняем или обновляем чат в chats_v2 СРАЗУ с owner_id
+            cursor.execute(
+                """INSERT INTO chats_v2 (chat_id, chat_title, owner_id, ai_enabled) 
+                   VALUES (%s, %s, %s, FALSE)
+                   ON CONFLICT (chat_id) 
+                   DO UPDATE SET owner_id = EXCLUDED.owner_id, chat_title = EXCLUDED.chat_title""",
+                (chat_id, chat_title, admin_id)
+            )
+            
+            # 2. Оставляем вашу таблицу chat_admins (если она нужна для других фич)
             cursor.execute(
                 '''INSERT INTO chat_admins (chat_id, admin_id) 
                    VALUES (%s, %s) 
                    ON CONFLICT (chat_id, admin_id) DO NOTHING''',
                 (chat_id, admin_id)
             )
+            
             conn.commit()
-            print(f"✅ Авто-привязка: Чат '{chat_title}' закреплен за {admin_id}")
+            print(f"✅ Авто-привязка: Чат '{chat_title}' ({chat_id}) закреплен за владельцем {admin_id}")
         except Exception as e:
+            conn.rollback()
             print(f"❌ Ошибка авто-привязки: {e}")
+
 
 
 # --- ОБРАБОТЧИКИ НАЖАТИЙ НА КНОПКИ МЕНЮ ---
