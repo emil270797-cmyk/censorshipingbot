@@ -291,53 +291,47 @@ def basic_filter(text: str) -> bool:
 
 
 # --- 4. ФУНКЦИЯ ИИ-МОДЕРАЦИИ (Gemini REST API) ---
-async def ai_filter(author_name: str, text: str) -> bool:
+async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) -> str:
+    """
+    Отправляет текст в Gemini.
+    Возвращает строку: "ok", "spam", "toxic", "obscene" или "error".
+    """
     try:
-        print(f"🧠 ОТПРАВЛЯЮ В GEMINI: {author_name} - {text[:20]}...", flush=True)
-        
-        prompt = (
-            "Ты — строгий модератор публичного чата. Твоя задача — анализировать сообщения и находить скрытый спам.\n"
-            "Отвечай ТОЛЬКО словом 'True' (если сообщение нужно удалить) или 'False' (если оно нормальное).\n\n"
-            "Что нужно удалять (True):\n"
-            "1. Завуалированный мат, токсичность и пассивную агрессию.\n"
-            "2. Спам, рекламу заработка, казино, криптовалюты.\n"
-            "3. Комментарии от ботов (бессмысленные комплименты, неестественный флирт, пустые вопросы-наживки для начала диалога).\n\n"
-            f"Имя автора: {author_name}\n"
-            f"Сообщение: {text}"
-        )
-        
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={GEMINI_KEY}"
-        
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "safetySettings": [
-                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-            ]
-        }
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url,
-                headers={"Content-Type": "application/json"},
-                json=payload
-            ) as resp:
-                data = await resp.json()
-                
-                if resp.status != 200:
-                    print(f"❌ Ошибка API Google: {data}", flush=True)
-                    return False
-                    
-                result = data['candidates'][0]['content']['parts'][0]['text'].strip().lower()
-                print(f"🤖 ОТВЕТ GEMINI: {result}", flush=True)
-                
-                return "true" in result
-                
+        # ОБЕЗЛИЧЕННЫЙ ЛОГ ЗАПРОСА
+        print(f"🧠 AI moderation request | chat_id: {chat_id} | message_id: {message_id}", flush=True)
+
+        prompt = f"""
+        Проверь это сообщение от пользователя "{author_name}". 
+        Твоя задача — классифицировать его. 
+        Ответь ТОЛЬКО ОДНИМ СЛОВОМ из списка:
+        ok - обычное сообщение
+        spam - реклама, ссылки на каналы, призывы подписаться, заработок
+        toxic - агрессия, оскорбления (прямые или скрытые), травля
+        obscene - мат, завуалированный мат, непристойности
+
+        Сообщение: {text}
+        """
+
+        response = chat_session.send_message(prompt)
+        result = response.text.strip().lower()
+
+        # Очищаем ответ от лишних знаков препинания, если ИИ вдруг их добавит
+        result = ''.join(c for c in result if c.isalpha())
+
+        # Проверка, чтобы ИИ не выдал отсебятину
+        valid_responses = ["ok", "spam", "toxic", "obscene"]
+        if result not in valid_responses:
+            result = "error"
+
+        # ОБЕЗЛИЧЕННЫЙ ЛОГ ОТВЕТА
+        print(f"🤖 AI moderation result | chat_id: {chat_id} | message_id: {message_id} | result: {result}", flush=True)
+        return result
+
     except Exception as e:
-        print(f"❌ Системная ошибка ИИ: {e}", flush=True)
-        return False
+        # В случае ошибки тоже не выводим сам текст
+        print(f"⚠️ Ошибка Gemini | chat_id: {chat_id} | message_id: {message_id} | Error: {e}", flush=True)
+        return "error"
+
 
 
 # --- 5. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ И АДМИНОВ ---
