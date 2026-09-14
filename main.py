@@ -1209,8 +1209,9 @@ async def main():
     web_thread = Thread(target=run_web, daemon=True)
     web_thread.start()
     
-    # 👈 Запускаем фоновый сканер блокчейна TON
-    asyncio.create_task(check_ton_payments_loop())
+
+
+    
     
     # Запуск самого бота
     await dp.start_polling(bot)
