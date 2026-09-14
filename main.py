@@ -980,26 +980,37 @@ scheduler.start()
 # --- 8. ЗАПУСК БОТА И ВЕБ-СЕРВЕРА ---
 # --- БЛОК FLASK WEB-SERVER И API ---
 from flask import Flask, request, jsonify
+import hmac
+import hashlib
+import json
+import requests
+from urllib.parse import parse_qsl, unquote
+from functools import wraps
+import time
+from datetime import datetime
 
 app = Flask(__name__)
 
+# 🔒 Указываем точный адрес вашего сайта (защита от CORS-атак)
+ALLOWED_ORIGIN = "https://emil270797-cmyk.github.io"
+
+def add_cors(response):
+    response.headers.add("Access-Control-Allow-Origin", ALLOWED_ORIGIN)
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    response.headers.add("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    return response
+
+# 🔒 Функция криптографической проверки подписи Telegram
 def validate_telegram_data(init_data: str, bot_token: str):
-    """
-    Проверяет валидность initData от Telegram Mini App по официальному алгоритму HMAC-SHA-256.
-    Возвращает dict с данными пользователя при успехе, иначе None.
-    """
     try:
         parsed_data = dict(parse_qsl(init_data))
         if "hash" not in parsed_data:
             return None
             
         received_hash = parsed_data.pop("hash")
-        # Сортируем пары по алфавиту в формате key=value
         data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
         
-        # 1. Вычисляем секретный ключ из токена бота
         secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-        # 2. Вычисляем контрольный хэш
         calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
         
         if hmac.compare_digest(calculated_hash, received_hash):
@@ -1011,28 +1022,24 @@ def validate_telegram_data(init_data: str, bot_token: str):
         print(f"Ошибка проверки initData: {e}", flush=True)
         return None
 
+# 🔒 Декоратор, который не пустит запрос без правильной подписи
 def telegram_auth_required(f):
-    """Декоратор для защиты API эндпоинтов"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if request.method == 'OPTIONS':
-            return f(*args, **kwargs)
+            return add_cors(jsonify({'status': 'ok'}))
             
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('tma '):
-            res = jsonify({"status": "error", "error": "Требуется авторизация через Telegram"})
-            res.headers.add("Access-Control-Allow-Origin", "https://emil270797-cmyk.github.io")
-            return res, 401
+            return add_cors(jsonify({"status": "error", "error": "Требуется авторизация через Telegram"})), 401
             
         init_data_str = auth_header[4:]
         user_data = validate_telegram_data(init_data_str, TOKEN)
         
         if not user_data or "id" not in user_data:
-            res = jsonify({"status": "error", "error": "Недействительная подпись данных Telegram"})
-            res.headers.add("Access-Control-Allow-Origin", "https://emil270797-cmyk.github.io")
-            return res, 403
+            return add_cors(jsonify({"status": "error", "error": "Недействительная подпись данных Telegram"})), 403
             
-        # Надежно сохраняем подтвержденный telegram ID в объекте запроса
+        # Надежно сохраняем подтвержденный ID пользователя
         request.verified_user_id = int(user_data["id"])
         return f(*args, **kwargs)
     return decorated_function
@@ -1042,319 +1049,124 @@ def home():
     return "Бот-модератор работает!"
 
 @app.route('/api/get_chats', methods=['GET', 'OPTIONS'])
+@telegram_auth_required
 def api_get_chats():
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
-        return response
-
-    owner_id = request.args.get('owner_id')
-    if not owner_id:
-        res = jsonify({"status": "error", "error": "No owner_id provided"})
-        res.headers.add("Access-Control-Allow-Origin", "*")
-        return res, 400
-
+    if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
+    owner_id = request.verified_user_id  # Берем проверенный ID
+    
     try:
-        # Выбираем чаты, которые принадлежат этому владельцу
         cursor.execute("SELECT chat_id, chat_title, ai_enabled FROM chats_v2 WHERE owner_id = %s", (owner_id,))
         rows = cursor.fetchall()
-        
-        chats_list = []
-        for row in rows:
-            chats_list.append({
-                "chat_id": str(row[0]),
-                "chat_title": row[1] or "Без названия",
-                "ai_enabled": bool(row[2])
-            })
-
-        response = jsonify({
-            "status": "success", 
-            "chats": chats_list
-        })
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
-
+        chats_list = [{"chat_id": str(r[0]), "chat_title": r[1] or "Без названия", "ai_enabled": bool(r[2])} for r in rows]
+        return add_cors(jsonify({"status": "success", "chats": chats_list}))
     except Exception as e:
-        response = jsonify({"status": "error", "error": str(e)})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response, 500
-
+        print(f"Ошибка БД в /api/get_chats: {e}", flush=True)
+        return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
 @app.route('/api/get_user_sub', methods=['GET', 'OPTIONS'])
+@telegram_auth_required
 def api_get_user_sub():
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        response.headers.add("Access-Control-Allow-Methods", "GET, OPTIONS")
-        return response
-
-    owner_id = request.args.get('owner_id')
-    if not owner_id:
-        res = jsonify({"status": "error", "error": "No owner_id"})
-        res.headers.add("Access-Control-Allow-Origin", "*")
-        return res, 400
-
+    if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
+    owner_id = request.verified_user_id
+    
     try:
         current_time = time.time()
         cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
         sub_row = cursor.fetchone()
         
         is_active = False
-        max_slots = 3  # Дефолтный лимит, если записи еще нет
+        max_slots = 3
         expires_at = "Никогда"
         
         if sub_row:
             premium_until, max_slots = sub_row
             if premium_until > current_time:
                 is_active = True
-                import datetime
-                expires_at = datetime.datetime.fromtimestamp(premium_until).strftime('%Y-%m-%d %H:%M')
+                expires_at = datetime.fromtimestamp(premium_until).strftime('%Y-%m-%d %H:%M')
 
-        # Считаем, сколько чатов этот владелец уже подключил
         cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
         active_chats = cursor.fetchone()[0]
 
-        response = jsonify({
-            "status": "success",
-            "is_active": is_active,
-            "expires_at": expires_at,
-            "max_slots": max_slots,
-            "active_chats": active_chats
-        })
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
-
+        return add_cors(jsonify({"status": "success", "is_active": is_active, "expires_at": expires_at, "max_slots": max_slots, "active_chats": active_chats}))
     except Exception as e:
-        response = jsonify({"status": "error", "error": str(e)})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response, 500
-
+        print(f"Ошибка БД в /api/get_user_sub: {e}", flush=True)
+        return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
 @app.route('/api/toggle_ai', methods=['POST', 'OPTIONS'])
+@telegram_auth_required
 def api_toggle_ai():
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        response.headers.add("Access-Control-Allow-Methods", "POST")
-        return response
-
-    # Безопасное чтение JSON без авто-краша со стороны Flask
+    if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
+    
+    owner_id = request.verified_user_id
     data = request.get_json(silent=True) or {}
     chat_id = data.get('chat_id')
-    owner_id = data.get('owner_id')
-    
-    print(f"🔄 Получен запрос toggle_ai: chat_id={chat_id}, owner_id={owner_id}")
 
-    if not chat_id or not owner_id:
-        print(f"⚠️ Ошибка: не передан chat_id или owner_id (chat_id={chat_id}, owner_id={owner_id})")
-        res = jsonify({"status": "error", "error": "Не передан chat_id или owner_id"})
-        res.headers.add("Access-Control-Allow-Origin", "*")
-        return res, 400
+    if not chat_id:
+        return add_cors(jsonify({"status": "error", "error": "Не передан chat_id"})), 400
+
+    try:
+        chat_id_int = int(chat_id)
+    except (ValueError, TypeError):
+        return add_cors(jsonify({"status": "error", "error": "Некорректный chat_id"})), 400
 
     try:
         current_time = time.time()
-        
-        # 1. Сначала узнаем текущий статус чата (включен или выключен)
-        cursor.execute("SELECT ai_enabled FROM chats_v2 WHERE chat_id = %s", (chat_id,))
+        cursor.execute("SELECT ai_enabled, owner_id FROM chats_v2 WHERE chat_id = %s", (chat_id_int,))
         chat_row = cursor.fetchone()
-        current_ai_status = chat_row[0] if chat_row else False
         
-        # 2. Если ИИ сейчас ВЫКЛЮЧЕН и мы пытаемся его ВКЛЮЧИТЬ -> проверяем подписку и лимиты
+        # Проверяем, что чат принадлежит именно этому юзеру
+        if not chat_row or chat_row[1] != owner_id:
+            return add_cors(jsonify({"status": "error", "error": "Чат не найден или вы не владелец"})), 403
+
+        current_ai_status = chat_row[0]
         if not current_ai_status:
-            # Проверяем наличие активной подписки
             cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
             sub_row = cursor.fetchone()
-            
             if not sub_row or sub_row[0] < current_time:
-                res = jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})
-                res.headers.add("Access-Control-Allow-Origin", "*")
-                return res, 400
+                return add_cors(jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})), 400
                 
             max_slots = sub_row[1]
-            
-            # Проверяем лимит занятых слотов
             cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
             active_chats_count = cursor.fetchone()[0]
-            
             if active_chats_count >= max_slots:
-                res = jsonify({
-                    "status": "error", 
-                    "error": f"Лимит исчерпан ({active_chats_count}/{max_slots} чатов). Купите дополнительный пакет."
-                })
-                res.headers.add("Access-Control-Allow-Origin", "*")
-                return res, 400
+                return add_cors(jsonify({"status": "error", "error": f"Лимит исчерпан ({active_chats_count}/{max_slots} чатов). Купите дополнительный пакет."})), 400
 
-        # 3. Переключаем статус (если мы дошли сюда, значит либо мы ВЫКЛЮЧАЕМ ИИ, либо все проверки на включение пройдены)
         new_ai_status = not current_ai_status
-        cursor.execute("UPDATE chats_v2 SET ai_enabled = %s, owner_id = %s WHERE chat_id = %s", (new_ai_status, owner_id, chat_id))
+        cursor.execute("UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s", (new_ai_status, chat_id_int))
         conn.commit()
-
-        response = jsonify({"status": "success", "ai_enabled": new_ai_status})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
+        return add_cors(jsonify({"status": "success", "ai_enabled": new_ai_status}))
 
     except Exception as e:
-        print(f"❌ Критическая ошибка в /api/toggle_ai: {e}")
-        response = jsonify({"status": "error", "error": str(e)})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response, 500
-
-
-
-
-@app.route('/api/get_subscription', methods=['GET', 'OPTIONS'])
-def api_get_subscription():
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        response.headers.add("Access-Control-Allow-Methods", "GET")
-        return response
-
-    chat_id = request.args.get('chat_id')
-    if not chat_id:
-        res = jsonify({"error": "Не передан chat_id"})
-        res.headers.add("Access-Control-Allow-Origin", "*")
-        return res, 400
-        
-    try:
-        cursor.execute('SELECT premium_until, ai_enabled FROM chats_v2 WHERE chat_id = %s', (chat_id,))
-        res_db = cursor.fetchone()
-        
-        if not res_db:
-            res = jsonify({"error": "Чат не найден"})
-            res.headers.add("Access-Control-Allow-Origin", "*")
-            return res, 404
-            
-        premium_until, ai_enabled = res_db
-        current_time = time.time()
-        is_active = premium_until >= current_time
-        
-        # Считаем оставшиеся дни (если активна)
-        days_left = max(0, int((premium_until - current_time) / 86400)) if is_active else 0
-        
-        response = jsonify({
-            "status": "success",
-            "is_premium": is_active,
-            "days_left": days_left,
-            "ai_enabled": ai_enabled
-        })
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
-        
-    except Exception as e:
-        response = jsonify({"error": str(e)})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response, 500
-
-@app.route('/api/create_stars_subscription', methods=['POST', 'OPTIONS'])
-def api_create_stars_subscription():
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        response.headers.add("Access-Control-Allow-Methods", "POST")
-        return response
-
-    data = request.json or {}
-    chat_id = data.get('chat_id')
-    
-    if not chat_id:
-        res = jsonify({"status": "error", "error": "Не передан chat_id"})
-        res.headers.add("Access-Control-Allow-Origin", "*")
-        return res, 400
-
-    try:
-        import os
-        token = os.getenv("BOT_TOKEN") # Или ваш токен
-        
-        url = f"https://api.telegram.org/bot{token}/createInvoiceLink"
-        payload = {
-            "title": "PRO Подписка (Автопродление)",
-            "description": "Ежемесячная подписка на ИИ-модератора. Отменить можно в любой момент.",
-            "payload": f"sub_recur_{chat_id}",
-            "currency": "XTR",
-            "prices": [{"label": "PRO Подписка / месяц", "amount": 100}],
-            # КЛЮЧЕВОЙ ПАРАМЕТР ДЛЯ АВТОПРОДЛЕНИЯ: период в секундах (30 дней = 2592000)
-            "subscription_period": 2592000 
-        }
-        
-        resp = requests.post(url, json=payload, timeout=10)
-        res_data = resp.json()
-        
-        if res_data.get("ok"):
-            invoice_link = res_data["result"]
-            response = jsonify({"status": "success", "invoice_link": invoice_link})
-        else:
-            error_desc = res_data.get("description", "Unknown error")
-            response = jsonify({"status": "error", "error": error_desc}), 400
-            
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
-        
-    except Exception as e:
-        response = jsonify({"status": "error", "error": str(e)})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response, 500
-
-
-from aiogram.types import LabeledPrice
-
-import requests
+        conn.rollback()
+        print(f"Критическая ошибка в /api/toggle_ai: {e}", flush=True)
+        return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
 @app.route('/api/create_stars_invoice', methods=['POST', 'OPTIONS'])
+@telegram_auth_required
 def api_create_stars_invoice():
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
-        response.headers.add("Access-Control-Allow-Methods", "POST")
-        return response
-
-    data = request.json or {}
-    chat_id = data.get('chat_id')
+    if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
+    owner_id = request.verified_user_id
     
-    if not chat_id:
-        res = jsonify({"error": "Не передан chat_id"})
-        res.headers.add("Access-Control-Allow-Origin", "*")
-        return res, 400
-
     try:
-        # Получаем TOKEN вашего бота из переменных окружения или константы
-        import os
-        token = os.getenv("BOT_TOKEN") # Или подставьте ваш токен строкой, если он прописан напрямую
-        
-        # Формируем запрос напрямую к Telegram API (создание инвойс-ссылки)
-        url = f"https://api.telegram.org/bot{token}/createInvoiceLink"
+        url = f"https://api.telegram.org/bot{TOKEN}/createInvoiceLink"
         payload = {
-            "title": "PRO Подписка для чата",
-            "description": "Снятие лимитов и включение ИИ-модератора на 30 дней",
-            "payload": f"sub_stars_{chat_id}",
+            "title": "PRO Подписка (+3 чата)",
+            "description": "Снятие лимитов и включение ИИ-модератора",
+            "payload": f"sub_stars_{owner_id}",
             "currency": "XTR",
-            "prices": [{"label": "PRO Подписка на 30 дней", "amount": 100}]
+            "prices": [{"label": "PRO Подписка", "amount": 100}]
         }
-        
         resp = requests.post(url, json=payload, timeout=10)
         res_data = resp.json()
         
         if res_data.get("ok"):
-            invoice_link = res_data["result"]
-            response = jsonify({"status": "success", "invoice_link": invoice_link})
+            return add_cors(jsonify({"status": "success", "invoice_link": res_data["result"]}))
         else:
-            error_desc = res_data.get("description", "Unknown error")
-            response = jsonify({"status": "error", "error": error_desc}), 400
-            
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
-        
+            return add_cors(jsonify({"status": "error", "error": "Ошибка генерации счета"})), 400
     except Exception as e:
-        response = jsonify({"status": "error", "error": str(e)})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response, 500
+        print(f"Ошибка выписки счета Stars: {e}", flush=True)
+        return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
+
 
 
 
