@@ -881,73 +881,11 @@ async def handle_messages(m: Message):
 
 import aiohttp
 
-# Укажите ваш настоящий TON-кошелек из Tonkeeper
-# Если кошелек не задан в переменных Render, бот сразу сообщит об этом при старте
-YOUR_TON_WALLET = os.environ["TON_WALLET"]
 
  
 
-async def check_ton_payments_loop():
-    """Фоновая задача, которая проверяет новые транзакции в TON каждые 60 секунд"""
-    url = f"https://toncenter.com/api/v2/getTransactions?address={YOUR_TON_WALLET}&limit=10&archival=true"
-    
-    while True:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data.get("ok") and "result" in data:
-                            transactions = data["result"]
-                            
-                            for tx in transactions:
-                                in_msg = tx.get("in_msg", {})
-                                if not in_msg or not in_msg.get("source"):
-                                    continue 
-                                
-                                value_nano = int(in_msg.get("value", 0))
-                                ton_amount = value_nano / 0.4*10**9 
-                                message_text = in_msg.get("message", "") or ""
-                                
-                                if message_text.startswith("sub_"):
-                                    try:
-                                        chat_id = int(message_text.replace("sub_", ""))
-                                        tx_hash = tx.get("transaction_id", {}).get("hash", "")
-                                        
-                                        cursor.execute("SELECT 1 FROM processed_txs WHERE tx_hash = %s", (tx_hash,))
-                                        if cursor.fetchone():
-                                            continue 
-                                            
-                                        if ton_amount >= 0.5: # Минимальная сумма за подписку
-                                            current_time = time.time()
-                                            
-                                            cursor.execute("SELECT premium_until FROM chats_v2 WHERE chat_id = %s", (chat_id,))
-                                            res = cursor.fetchone()
-                                            
-                                            if res:
-                                                current_premium = res[0]
-                                                base_time = max(current_premium, current_time)
-                                                new_premium_until = base_time + (30 * 86400) # +30 дней
-                                                
-                                                cursor.execute(
-                                                    "UPDATE chats_v2 SET premium_until = %s, ai_enabled = TRUE WHERE chat_id = %s",
-                                                    (new_premium_until, chat_id)
-                                                )
-                                                
-                                                cursor.execute(
-                                                    "INSERT INTO processed_txs (tx_hash, chat_id) VALUES (%s, %s)",
-                                                    (tx_hash, chat_id)
-                                                )
-                                                conn.commit()
-                                                print(f"✅ Успешно зачислен TON-премиум для чата {chat_id}!")
-                                    except Exception as inner_e:
-                                        print(f"⚠️ Ошибка обработки TON-транзакции: {inner_e}")
-        except Exception as e:
-            print(f"📡 Ошибка соединения с Toncenter API: {e}")
-            
-        await asyncio.sleep(60) 
+ 
 
-from apscheduler.schedulers.background import BackgroundScheduler
 import time
 
 def check_expiring_subscriptions():
