@@ -852,12 +852,12 @@ async def handle_messages(m: Message):
 import aiohttp
 
 # Укажите ваш настоящий TON-кошелек из Tonkeeper
-YOUR_TON_WALLET = os.environ.get("TON_WALLET", "UQBY8XHE4clVdbLnLmmbqw-tyQsg3O_I7k_ri21oBeVfsK3H")
+TON_WALLET = os.environ["TON_WALLET"]
  
 
 async def check_ton_payments_loop():
     """Фоновая задача, которая проверяет новые транзакции в TON каждые 60 секунд"""
-    url = f"https://toncenter.com/api/v2/getTransactions?address={YOUR_TON_WALLET}&limit=10&archival=true"
+    url = f"https://toncenter.com/api/v2/getTransactions?address={TON_WALLET}&limit=10&archival=true"
     
     while True:
         try:
