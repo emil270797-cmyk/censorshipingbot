@@ -622,6 +622,45 @@ async def cmd_chatlist(m: Message, bot: Bot):
     except Exception as e:
         await m.answer(f"❌ Ошибка отправки списка: {e}")
 
+from aiogram.filters import Command
+import time
+
+# Ваш Telegram ID
+MY_ADMIN_ID = 354584527 
+
+@dp.message(Command("givepro"))
+async def cmd_give_pro(message: types.Message):
+    # Бот реагирует только на сообщения от владельца
+    if message.from_user.id != MY_ADMIN_ID:
+        return
+    
+    args = message.text.split()
+    if len(args) != 4:
+        await message.answer("⚠️ Неверный формат!\nПишите так: `/givepro <id> <дней> <слотов>`\nПример: `/givepro 354584527 30 3`", parse_mode="Markdown")
+        return
+        
+    target_id = args[1]
+    days = int(args[2])
+    slots = int(args[3])
+    
+    current_time = int(time.time())
+    premium_until = current_time + (days * 24 * 60 * 60)
+    
+    try:
+        cursor.execute(
+            """INSERT INTO user_subscriptions (owner_id, premium_until, slots) 
+               VALUES (%s, %s, %s)
+               ON CONFLICT (owner_id) 
+               DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots""",
+            (target_id, premium_until, slots)
+        )
+        conn.commit()
+        await message.answer(f"✅ Готово! Пользователю `{target_id}` выдана PRO-подписка на {days} дней. Слотов: {slots}.", parse_mode="Markdown")
+    except Exception as e:
+        conn.rollback()
+        await message.answer(f"❌ Ошибка: {e}")
+
+
 @dp.message(Command("give_premium"))
 async def cmd_give_premium(m: Message):
     if m.from_user.id != OWNER_ID: return
