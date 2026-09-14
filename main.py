@@ -57,6 +57,13 @@ except Exception as e:
     conn.rollback()
     print(f"Ошибка при добавлении колонки: {e}")
 
+try:
+    cursor.execute("ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+    conn.commit()
+except Exception:
+    pass
+
+
 # Создаем таблицу подписок владельцев, если её еще нет
 try:
     cursor.execute("""
@@ -1173,6 +1180,64 @@ def api_create_stars_invoice():
         print(f"Ошибка выписки счета Stars: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
+@app.route('/api/chat_details', methods=['GET', 'OPTIONS'])
+@telegram_auth_required
+def api_chat_details():
+    if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
+    owner_id = request.verified_user_id
+    chat_id = request.args.get('chat_id')
+
+    if not chat_id:
+        return add_cors(jsonify({"status": "error", "error": "Не передан chat_id"})), 400
+
+    try:
+        chat_id_int = int(chat_id)
+        with conn.cursor() as cur:
+            # 1. Получаем информацию о чате
+            cur.execute("SELECT chat_title, premium_until, added_at, ai_enabled FROM chats_v2 WHERE chat_id = %s AND owner_id = %s", (chat_id_int, owner_id))
+            chat_row = cur.fetchone()
+            
+            if not chat_row:
+                return add_cors(jsonify({"status": "error", "error": "Доступ запрещен или чат не найден"})), 403
+
+            chat_title, premium_until, added_at, ai_enabled = chat_row
+            
+            # 2. Получаем последние 20 действий бота в этом чате
+            cur.execute("""
+                SELECT user_name, reason, action_type, created_at 
+                FROM moderation_logs 
+                WHERE chat_id = %s 
+                ORDER BY created_at DESC 
+                LIMIT 20
+            """, (chat_id_int,))
+            logs_rows = cur.fetchall()
+
+        # Формируем список логов
+        logs = []
+        for lr in logs_rows:
+            logs.append({
+                "user_name": lr[0],
+                "reason": lr[1],
+                "action": lr[2],
+                "date": lr[3].strftime('%d.%m %H:%M') if lr[3] else "Неизвестно"
+            })
+
+        current_time = time.time()
+        is_premium = bool(premium_until and premium_until > current_time)
+        added_date_str = added_at.strftime('%d.%m.%Y') if added_at else "Нет данных"
+
+        return add_cors(jsonify({
+            "status": "success",
+            "title": chat_title,
+            "is_premium": is_premium,
+            "ai_enabled": ai_enabled,
+            "added_at": added_date_str,
+            "logs": logs
+        }))
+
+    except Exception as e:
+        print(f"Ошибка в /api/chat_details: {e}", flush=True)
+        return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
 
 
