@@ -4,6 +4,11 @@ import re
 import aiohttp
 import psycopg2
 import pymorphy3
+import hmac
+import hashlib
+import json
+from urllib.parse import parse_qsl, unquote
+from functools import wraps
 from datetime import timedelta, datetime
 from threading import Thread
 from flask import Flask
