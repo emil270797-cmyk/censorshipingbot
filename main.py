@@ -983,6 +983,60 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
+def validate_telegram_data(init_data: str, bot_token: str):
+    """
+    Проверяет валидность initData от Telegram Mini App по официальному алгоритму HMAC-SHA-256.
+    Возвращает dict с данными пользователя при успехе, иначе None.
+    """
+    try:
+        parsed_data = dict(parse_qsl(init_data))
+        if "hash" not in parsed_data:
+            return None
+            
+        received_hash = parsed_data.pop("hash")
+        # Сортируем пары по алфавиту в формате key=value
+        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
+        
+        # 1. Вычисляем секретный ключ из токена бота
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        # 2. Вычисляем контрольный хэш
+        calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        
+        if hmac.compare_digest(calculated_hash, received_hash):
+            user_raw = parsed_data.get("user")
+            if user_raw:
+                return json.loads(unquote(user_raw))
+        return None
+    except Exception as e:
+        print(f"Ошибка проверки initData: {e}", flush=True)
+        return None
+
+def telegram_auth_required(f):
+    """Декоратор для защиты API эндпоинтов"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.method == 'OPTIONS':
+            return f(*args, **kwargs)
+            
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('tma '):
+            res = jsonify({"status": "error", "error": "Требуется авторизация через Telegram"})
+            res.headers.add("Access-Control-Allow-Origin", "https://emil270797-cmyk.github.io")
+            return res, 401
+            
+        init_data_str = auth_header[4:]
+        user_data = validate_telegram_data(init_data_str, TOKEN)
+        
+        if not user_data or "id" not in user_data:
+            res = jsonify({"status": "error", "error": "Недействительная подпись данных Telegram"})
+            res.headers.add("Access-Control-Allow-Origin", "https://emil270797-cmyk.github.io")
+            return res, 403
+            
+        # Надежно сохраняем подтвержденный telegram ID в объекте запроса
+        request.verified_user_id = int(user_data["id"])
+        return f(*args, **kwargs)
+    return decorated_function
+
 @app.route('/')
 def home():
     return "Бот-модератор работает!"
