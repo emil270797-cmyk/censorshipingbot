@@ -631,7 +631,9 @@ from aiogram.filters import Command
 import time
 
 # Ваш Telegram ID
-MY_ADMIN_ID = 354584527 
+MY_ADMIN_ID = int(os.environ.get("ADMIN_ID", 354584527))
+OWNER_ID = int(os.environ.get("ADMIN_ID", 354584527))
+ 
 
 @dp.message(Command("givepro"))
 async def cmd_give_pro(message: types.Message):
@@ -861,7 +863,8 @@ async def handle_messages(m: Message):
 import aiohttp
 
 # Укажите ваш настоящий TON-кошелек из Tonkeeper
-YOUR_TON_WALLET = "UQBY8XHE4clVdbLnLmmbqw-tyQsg3O_I7k_ri21oBeVfsK3H" 
+YOUR_TON_WALLET = os.environ.get("TON_WALLET", "UQBY8XHE4clVdbLnLmmbqw-tyQsg3O_I7k_ri21oBeVfsK3H")
+ 
 
 async def check_ton_payments_loop():
     """Фоновая задача, которая проверяет новые транзакции в TON каждые 60 секунд"""
@@ -1170,9 +1173,13 @@ def api_create_stars_invoice():
 
 
 
+from waitress import serve
+
 def run_web():
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    # Запускаем продакшен-сервер вместо встроенного Flask (app.run)
+    serve(app, host="0.0.0.0", port=port)
+
 
 
 async def main():
