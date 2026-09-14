@@ -931,13 +931,6 @@ def check_expiring_subscriptions():
     except Exception as e:
         print(f"Ошибка в фоновой задаче проверки подписок: {e}")
 
-# Запускаем планировщик
-scheduler = BackgroundScheduler()
-# Настраиваем запуск проверки каждый час (или раз в сутки: hours=24)
-scheduler.add_job(check_expiring_subscriptions, 'interval', hours=1)
-scheduler.start()
-
-
 
 # --- 8. ЗАПУСК БОТА И ВЕБ-СЕРВЕРА ---
 # --- БЛОК FLASK WEB-SERVER И API ---
