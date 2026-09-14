@@ -7,6 +7,7 @@ import pymorphy3
 import hmac
 import hashlib
 import json
+
 from urllib.parse import parse_qsl, unquote
 from functools import wraps
 from datetime import timedelta, datetime
@@ -62,6 +63,23 @@ try:
     conn.commit()
 except Exception:
     pass
+
+try:
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS payments (
+            id SERIAL PRIMARY KEY,
+            telegram_payment_charge_id VARCHAR(255) UNIQUE NOT NULL,
+            user_id BIGINT NOT NULL,
+            payload VARCHAR(255) NOT NULL,
+            amount INTEGER NOT NULL,
+            currency VARCHAR(10) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    ''')
+    conn.commit()
+except Exception as e:
+    print(f"Ошибка создания таблицы payments: {e}")
+
 
 
 # Создаем таблицу подписок владельцев, если её еще нет
@@ -693,53 +711,95 @@ async def send_invoice(m: Message):
         prices=prices
     )
 
-from aiogram.types import LabeledPrice, PreCheckoutQuery
-
-# --- ХЕНДЛЕРЫ ОПЛАТЫ TELEGRAM STARS ---
+from aiogram.types import PreCheckoutQuery
 
 @dp.pre_checkout_query()
 async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
-    # Обязательно подтверждаем пре-чеккаут, чтобы транзакция пошла дальше
+    # 1. Проверяем, наш ли это payload
+    if not pre_checkout_query.invoice_payload.startswith("sub_stars_"):
+        await bot.answer_pre_checkout_query(
+            pre_checkout_query.id, 
+            ok=False, 
+            error_message="Неизвестный товар. Пожалуйста, перезапустите приложение."
+        )
+        return
+        
+    # 2. Проверяем валюту (Telegram Stars)
+    if pre_checkout_query.currency != "XTR":
+        await bot.answer_pre_checkout_query(
+            pre_checkout_query.id, 
+            ok=False, 
+            error_message="Оплата принимается только в Telegram Stars."
+        )
+        return
+        
+    # 3. Проверяем точную сумму (100 Stars)
+    if pre_checkout_query.total_amount != 100:
+        await bot.answer_pre_checkout_query(
+            pre_checkout_query.id, 
+            ok=False, 
+            error_message="Неверная сумма платежа. Попробуйте еще раз."
+        )
+        return
+
+    # Если всё идеально, разрешаем оплату
     await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
 
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: Message):
-    payment = message.successful_payment
-    payload = payment.invoice_payload
+    payment_info = message.successful_payment
+    charge_id = payment_info.telegram_payment_charge_id
+    user_id = message.from_user.id
+    payload = payment_info.invoice_payload
     
-    # Проверяем, что это наш платеж за подписку (обычные звезды или автопродление)
-    if payload.startswith("sub_stars_") or payload.startswith("sub_recur_"):
-        try:
-            owner_id = message.from_user.id
-            current_time = time.time()
-            
-            # 1. Проверяем, есть ли уже активная подписка у этого владельца
-            cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
-            row = cursor.fetchone()
-            
-            if row and row[0] > current_time:
-                # Если подписка еще активна — продлеваем время и добавляем +3 слота
-                new_premium_until = row[0] + (30 * 86400)
-                new_slots = row[1] + 3
-            else:
-                # Если подписка истекла или первая покупка — даем 30 дней и 3 слота
-                new_premium_until = current_time + (30 * 86400)
-                new_slots = 3
+    # 1. Защита от дублей: Пытаемся записать транзакцию в БД
+    try:
+        cursor.execute("""
+            INSERT INTO payments (telegram_payment_charge_id, user_id, payload, amount, currency)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (charge_id, user_id, payload, payment_info.total_amount, payment_info.currency))
+        conn.commit()
+    except psycopg2.IntegrityError:
+        conn.rollback()
+        # Платёж с таким ID уже был обработан! Игнорируем дубль.
+        print(f"Дубль платежа перехвачен: {charge_id}")
+        return
+    except Exception as e:
+        conn.rollback()
+        print(f"Ошибка БД при записи платежа: {e}")
+        return
 
-            # 2. Сохраняем в таблицу подписок владельца
-            cursor.execute(
-                """INSERT INTO user_subscriptions (owner_id, premium_until, slots) 
-                   VALUES (%s, %s, %s) 
-                   ON CONFLICT (owner_id) 
-                   DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots""",
-                (owner_id, new_premium_until, new_slots)
-            )
-            conn.commit()
+    # 2. Если запись прошла успешно, выдаем товар
+    if payload.startswith("sub_stars_"):
+        owner_id = int(payload.split("_")[2]) # Извлекаем ID из sub_stars_123456
+        current_time = time.time()
+        
+        # Проверяем текущую подписку
+        cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+        sub_row = cursor.fetchone()
+        
+        if sub_row and sub_row[0] > current_time:
+            # Продлеваем текущую
+            new_until = sub_row[0] + (30 * 24 * 3600)
+            new_slots = sub_row[1] + 3
+            cursor.execute("UPDATE user_subscriptions SET premium_until = %s, slots = %s WHERE owner_id = %s", 
+                           (new_until, new_slots, owner_id))
+        else:
+            # Создаем новую
+            new_until = current_time + (30 * 24 * 3600)
+            new_slots = 3
+            cursor.execute("""
+                INSERT INTO user_subscriptions (owner_id, premium_until, slots)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (owner_id) 
+                DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots
+            """, (owner_id, new_until, new_slots))
             
-            if payment.is_recurring:
-                await message.answer("🔄 Автоматическое продление успешно! Добавлено еще +3 слота и 30 дней PRO.")
-            else:
-                await message.answer("🎉 Пакет успешно куплен! Вам добавлено +3 слота для каналов, подписка активна на 30 дней.")
+        conn.commit()
+        
+        await message.answer("🎉 Оплата успешно получена! Вам добавлено 3 слота на 30 дней. Можете включать ИИ в Личном кабинете!")
+
                 
         except Exception as e:
             print(f"⚠️ Ошибка обработки успешного платежа: {e}")
