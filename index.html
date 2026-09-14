@@ -150,10 +150,19 @@
                 const container = document.getElementById('chats-container');
                 container.innerHTML = '';
 
+                // ДОБАВЛЕННЫЙ БЛОК: показываем реальную ошибку сервера
+                if (data.status === 'error') {
+                    container.innerHTML = `<p style="color: #e74c3c;">Ошибка сервера: ${data.error}</p>`;
+                    return;
+                }
+
                 if (!data.chats || data.chats.length === 0) {
                     container.innerHTML = '<p style="color: var(--tg-theme-hint-color, #aaa);">У вас пока нет подключенных чатов или каналов.</p>';
                     return;
                 }
+                
+                // ... дальше идет старый код data.chats.forEach ...
+
 
                 data.chats.forEach(chat => {
                     const card = document.createElement('div');
