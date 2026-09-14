@@ -1046,11 +1046,14 @@ def home():
 @telegram_auth_required
 def api_get_chats():
     if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
-    owner_id = request.verified_user_id  # Берем проверенный ID
+    owner_id = request.verified_user_id
     
     try:
-        cursor.execute("SELECT chat_id, chat_title, ai_enabled FROM chats_v2 WHERE owner_id = %s", (owner_id,))
-        rows = cursor.fetchall()
+        # Создаем локальный курсор для защиты от параллельных запросов
+        with conn.cursor() as cur:
+            cur.execute("SELECT chat_id, chat_title, ai_enabled FROM chats_v2 WHERE owner_id = %s", (owner_id,))
+            rows = cur.fetchall()
+            
         chats_list = [{"chat_id": str(r[0]), "chat_title": r[1] or "Без названия", "ai_enabled": bool(r[2])} for r in rows]
         return add_cors(jsonify({"status": "success", "chats": chats_list}))
     except Exception as e:
@@ -1065,23 +1068,30 @@ def api_get_user_sub():
     
     try:
         current_time = time.time()
-        cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
-        sub_row = cursor.fetchone()
-        
-        is_active = False
-        max_slots = 3
-        expires_at = "Никогда"
-        
-        if sub_row:
-            premium_until, max_slots = sub_row
-            if premium_until > current_time:
-                is_active = True
-                expires_at = datetime.fromtimestamp(premium_until).strftime('%Y-%m-%d %H:%M')
+        with conn.cursor() as cur:
+            cur.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+            sub_row = cur.fetchone()
+            
+            is_active = False
+            max_slots = 3
+            expires_at = "Никогда"
+            
+            if sub_row:
+                premium_until, max_slots = sub_row
+                if premium_until > current_time:
+                    is_active = True
+                    expires_at = datetime.fromtimestamp(premium_until).strftime('%Y-%m-%d %H:%M')
 
-        cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
-        active_chats = cursor.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
+            active_chats = cur.fetchone()[0]
 
-        return add_cors(jsonify({"status": "success", "is_active": is_active, "expires_at": expires_at, "max_slots": max_slots, "active_chats": active_chats}))
+        return add_cors(jsonify({
+            "status": "success", 
+            "is_active": is_active, 
+            "expires_at": expires_at, 
+            "max_slots": max_slots, 
+            "active_chats": active_chats
+        }))
     except Exception as e:
         print(f"Ошибка БД в /api/get_user_sub: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
@@ -1105,35 +1115,37 @@ def api_toggle_ai():
 
     try:
         current_time = time.time()
-        cursor.execute("SELECT ai_enabled, owner_id FROM chats_v2 WHERE chat_id = %s", (chat_id_int,))
-        chat_row = cursor.fetchone()
-        
-        # Проверяем, что чат принадлежит именно этому юзеру
-        if not chat_row or chat_row[1] != owner_id:
-            return add_cors(jsonify({"status": "error", "error": "Чат не найден или вы не владелец"})), 403
+        with conn.cursor() as cur:
+            cur.execute("SELECT ai_enabled, owner_id FROM chats_v2 WHERE chat_id = %s", (chat_id_int,))
+            chat_row = cur.fetchone()
+            
+            if not chat_row or chat_row[1] != owner_id:
+                return add_cors(jsonify({"status": "error", "error": "Чат не найден или вы не владелец"})), 403
 
-        current_ai_status = chat_row[0]
-        if not current_ai_status:
-            cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
-            sub_row = cursor.fetchone()
-            if not sub_row or sub_row[0] < current_time:
-                return add_cors(jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})), 400
-                
-            max_slots = sub_row[1]
-            cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
-            active_chats_count = cursor.fetchone()[0]
-            if active_chats_count >= max_slots:
-                return add_cors(jsonify({"status": "error", "error": f"Лимит исчерпан ({active_chats_count}/{max_slots} чатов). Купите дополнительный пакет."})), 400
+            current_ai_status = chat_row[0]
+            if not current_ai_status:
+                cur.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+                sub_row = cur.fetchone()
+                if not sub_row or sub_row[0] < current_time:
+                    return add_cors(jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})), 400
+                    
+                max_slots = sub_row[1]
+                cur.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
+                active_chats_count = cur.fetchone()[0]
+                if active_chats_count >= max_slots:
+                    return add_cors(jsonify({"status": "error", "error": f"Лимит исчерпан ({active_chats_count}/{max_slots} чатов). Купите дополнительный пакет."})), 400
 
-        new_ai_status = not current_ai_status
-        cursor.execute("UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s", (new_ai_status, chat_id_int))
-        conn.commit()
+            new_ai_status = not current_ai_status
+            cur.execute("UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s", (new_ai_status, chat_id_int))
+            conn.commit()
+            
         return add_cors(jsonify({"status": "success", "ai_enabled": new_ai_status}))
 
     except Exception as e:
         conn.rollback()
         print(f"Критическая ошибка в /api/toggle_ai: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
+
 
 @app.route('/api/create_stars_invoice', methods=['POST', 'OPTIONS'])
 @telegram_auth_required
