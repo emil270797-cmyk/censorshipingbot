@@ -317,20 +317,13 @@ async def cmd_start(m: Message):
     cursor.execute('SELECT chat_id FROM chat_admins WHERE admin_id = %s', (admin_id,))
     chats = cursor.fetchall()
 
-    # Создаем прозрачные кнопки-меню
+    # Оставляем ТОЛЬКО кнопку Личного кабинета
     inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🌟 Подключить Premium", callback_data="buy_premium")
-        ],
         [
             InlineKeyboardButton(
                 text="🎛 Открыть Личный Кабинет", 
                 web_app=WebAppInfo(url="https://emil270797-cmyk.github.io/censorshipingbot/")
             )
-        ],
-        [
-            InlineKeyboardButton(text="📊 Статистика", callback_data="stats"),
-            InlineKeyboardButton(text="⚙️ Статус", callback_data="status")
         ]
     ])
 
@@ -340,15 +333,12 @@ async def cmd_start(m: Message):
         "🛠 <b>КАК НАЧАТЬ РАБОТУ:</b>\n"
         "<b>1.</b> Добавьте меня в вашу группу (или в привязанный чат канала для комментариев).\n"
         "<b>2.</b> Выдайте мне права администратора: <i>«Удаление сообщений»</i> и <i>«Блокировка пользователей»</i>. Без них я не смогу наводить порядок!\n\n"
-        "📌 <b>ОСНОВНЫЕ КОМАНДЫ:</b>\n"
-        "<i>(Вводите их прямо в вашей группе или используйте нижнее меню)</i>\n"
+        "📌 <b>ОСНОВНЫЕ КОМАНДЫ (вводить в самой группе):</b>\n"
         "🔹 /status — проверить, активна ли защита в чате.\n"
-        "🔹 /stats — посмотреть статистику удаленного мусора.\n"
-        "🔹 /buy_premium — активировать ИИ-модуль Gemini.\n\n"
-        "👇 Используйте кнопки ниже для быстрого управления:"
+        "🔹 /stats — посмотреть статистику удаленного мусора.\n\n"
+        "👇 <b>Управление подпиской и ИИ:</b>"
     )
 
-    # ДОБАВЛЯЕМ БЛОК ЛИЧНОГО КАБИНЕТА
     if chats:
         text += "\n\n🎛 <b>Ваши привязанные чаты:</b>\n"
         for row in chats:
@@ -358,6 +348,7 @@ async def cmd_start(m: Message):
         text += "\n\n📭 У вас пока нет привязанных чатов."
         
     await m.answer(text, reply_markup=inline_keyboard, parse_mode="HTML")
+
 
 
 # Ловим события добавления бота в группу или выдачи ему прав
