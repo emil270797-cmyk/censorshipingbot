@@ -403,33 +403,6 @@ async def bot_added_to_chat(event: ChatMemberUpdated):
 
 # --- ОБРАБОТЧИКИ НАЖАТИЙ НА КНОПКИ МЕНЮ ---
 
-@dp.callback_query(F.data == "menu_premium")
-async def process_premium_btn(callback: CallbackQuery):
-    await callback.message.answer(
-        "💎 <b>Premium AI Модератор</b>\n\n"
-        "Включение нейросети Gemini для точного распознавания скрытой агрессии и завуалированного мата.\n\n"
-        "<i>Для оплаты добавьте бота (50 Stars) в группу и напишите команду /buy_premium или нажмите серую кнопку внизу.</i>",
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data == "menu_stats")
-async def process_stats_btn(callback: CallbackQuery):
-    await callback.message.answer(
-        "⚠️ <b>Обратите внимание:</b>\n"
-        "Чтобы посмотреть статистику удалений и мутов, используйте команду /stats прямо внутри вашей группы, где добавлен бот.",
-        parse_mode="HTML"
-    )
-    await callback.answer()
-
-@dp.callback_query(F.data == "menu_status")
-async def process_status_btn(callback: CallbackQuery):
-    await callback.message.answer(
-        "⚠️ <b>Обратите внимание:</b>\n"
-        "Чтобы проверить статус, используйте команду /status прямо внутри вашей группы.",
-        parse_mode="HTML"
-    )
-    await callback.answer()
 
 @dp.message(Command("report"))
 async def send_report(m: Message):
