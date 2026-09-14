@@ -175,23 +175,24 @@ def set_ai(chat_id, status, days=30):
 def is_ai(chat_id):
     # Теперь мы берем ai_enabled из чата, а premium_until - из подписки владельца
     cursor.execute('''
-        SELECT c.ai_enabled, u.premium_until
+        SELECT c.ai_enabled, u.premium_until 
         FROM chats_v2 c
         LEFT JOIN user_subscriptions u ON c.owner_id = u.owner_id
         WHERE c.chat_id = %s
     ''', (chat_id,))
     res = cursor.fetchone()
     
-if res and res[0]:  # Если тумблер включен
-    premium_until = res[1] or 0
-    if datetime.now().timestamp() < premium_until:
-        return True
-    else:
-        # Если подписка владельца закончилась, выключаем ИИ в чате
-        cursor.execute('UPDATE chats_v2 SET ai_enabled = FALSE WHERE chat_id = %s', (chat_id,))
-        conn.commit()
-        return False
+    if res and res[0]:  # Если тумблер включен
+        premium_until = res[1] or 0
+        if datetime.now().timestamp() < premium_until:
+            return True
+        else:
+            # Если подписка владельца закончилась, выключаем ИИ в чате
+            cursor.execute('UPDATE chats_v2 SET ai_enabled = FALSE WHERE chat_id = %s', (chat_id,))
+            conn.commit()
+            return False
     return False
+
 
 def add_warn(user_id, chat_id):
     cursor.execute('SELECT count FROM warns WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
