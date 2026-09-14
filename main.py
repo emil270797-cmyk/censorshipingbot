@@ -173,14 +173,24 @@ def set_ai(chat_id, status, days=30):
     cursor.execute('UPDATE chats_v2 SET ai_enabled = %s, premium_until = %s WHERE chat_id = %s', (status, until, chat_id))
 
 def is_ai(chat_id):
-    cursor.execute('SELECT ai_enabled, premium_until FROM chats_v2 WHERE chat_id = %s', (chat_id,))
+    # Теперь мы берем ai_enabled из чата, а premium_until - из подписки владельца
+    cursor.execute('''
+        SELECT c.ai_enabled, u.premium_until
+        FROM chats_v2 c
+        LEFT JOIN user_subscriptions u ON c.owner_id = u.owner_id
+        WHERE c.chat_id = %s
+    ''', (chat_id,))
     res = cursor.fetchone()
-    if res and res[0]: 
-        if datetime.now().timestamp() < res[1]:
-            return True
-        else:
-            set_ai(chat_id, False)
-            return False
+    
+if res and res[0]:  # Если тумблер включен
+    premium_until = res[1] or 0
+    if datetime.now().timestamp() < premium_until:
+        return True
+    else:
+        # Если подписка владельца закончилась, выключаем ИИ в чате
+        cursor.execute('UPDATE chats_v2 SET ai_enabled = FALSE WHERE chat_id = %s', (chat_id,))
+        conn.commit()
+        return False
     return False
 
 def add_warn(user_id, chat_id):
@@ -467,10 +477,16 @@ async def send_report(m: Message):
 
 @dp.message(Command("status"), F.chat.type.in_({"group", "supergroup"}))
 async def chat_status(m: Message):
-    cursor.execute('SELECT ai_enabled, premium_until FROM chats_v2 WHERE chat_id = %s', (m.chat.id,))
+    # Обновляем команду /status, чтобы она тоже смотрела на подписку владельца
+    cursor.execute('''
+        SELECT c.ai_enabled, u.premium_until 
+        FROM chats_v2 c
+        LEFT JOIN user_subscriptions u ON c.owner_id = u.owner_id
+        WHERE c.chat_id = %s
+    ''', (m.chat.id,))
     res = cursor.fetchone()
     
-    if res and res[0] and res[1] > datetime.now().timestamp():
+    if res and res[0] and res[1] and res[1] > datetime.now().timestamp():
         end_date = datetime.fromtimestamp(res[1]).strftime('%d.%m.%Y %H:%M')
         await m.answer(
             f"🌟 <b>Статус чата:</b> PREMIUM\n"
@@ -482,9 +498,10 @@ async def chat_status(m: Message):
         await m.answer(
             f"🌑 <b>Статус чата:</b> Базовый\n"
             f"🤖 <b>Фильтр:</b> Стандартный словарный\n"
-            f"💡 Чтобы включить ИИ-модерацию, используйте /buy_premium",
+            f"💡 Чтобы включить ИИ-модерацию, используйте Личный Кабинет",
             parse_mode="HTML"
         )
+
 
 @dp.message(Command("unwarn"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_unwarn(m: Message):
