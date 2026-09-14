@@ -97,92 +97,95 @@
     </div>
 
     <script>
-        // Укажите ваш актуальный бэкенд URL (без слеша на конце)
-        const BACKEND_URL = "https://censorshipingbot.onrender.com"; 
+    const BACKEND_URL = "https://censorshipingbot.onrender.com";
+    const tg = window.Telegram.WebApp;
+    tg.expand();
 
-        const tg = window.Telegram.WebApp;
-        tg.expand(); // Растягиваем Mini App на весь экран
+    // Получаем криптографически подписанные данные запуска Mini App
+    const initData = tg.initData;
 
-        // Получаем Telegram ID текущего пользователя (владельца)
-        const ownerId = tg.initDataUnsafe?.user?.id;
-
-        // 1. Загрузка данных о подписке и слотах
-        function loadUserSubscription() {
-            if (!ownerId) {
-                document.getElementById('sub-status').innerText = "Ошибка: не удалось определить пользователя";
-                return;
-            }
-
-            fetch(`${BACKEND_URL}/api/get_user_sub?owner_id=${ownerId}`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        const subText = data.is_active ? `🟢 PRO активен до: ${data.expires_at}` : `🔴 PRO не активен`;
-                        document.getElementById('sub-status').innerText = subText;
-                        document.getElementById('slots-status').innerText = `Использовано каналов: ${data.active_chats} из ${data.max_slots}`;
-                    } else {
-                        document.getElementById('sub-status').innerText = "Не удалось загрузить статус подписки";
-                    }
-                })
-                .catch(err => {
-                    console.error("Ошибка загрузки подписки:", err);
-                    document.getElementById('sub-status').innerText = "Ошибка связи с сервером";
-                });
+    // Общая функция для выполнения запросов с авторизацией
+    async function apiRequest(endpoint, method = 'GET', body = null) {
+        if (!initData) {
+            tg.showAlert('Ошибка: приложение запущено вне Telegram!');
+            throw new Error('No initData available');
         }
 
-        // 2. Загрузка списка чатов пользователя
-        function loadUserChats() {
-            if (!ownerId) return;
+        const headers = {
+            'Authorization': `tma ${initData}`,
+            'Content-Type': 'application/json'
+        };
 
-            fetch(`${BACKEND_URL}/api/get_chats?owner_id=${ownerId}`)
-                .then(res => res.json())
-                .then(data => {
-                    const container = document.getElementById('chats-container');
-                    container.innerHTML = '';
-
-                    if (!data.chats || data.chats.length === 0) {
-                        container.innerHTML = '<p style="color: var(--tg-theme-hint-color, #aaa);">У вас пока нет подключенных чатов или каналов.</p>';
-                        return;
-                    }
-
-                    data.chats.forEach(chat => {
-                        const card = document.createElement('div');
-                        card.className = 'chat-card';
-
-                        const statusClass = chat.ai_enabled ? 'enabled' : 'disabled';
-                        const statusText = chat.ai_enabled ? 'Включен' : 'Выключен';
-
-                        card.innerHTML = `
-                            <div class="chat-info">
-                                <h4>${chat.chat_title || 'Без названия'}</h4>
-                                <p>ID: ${chat.chat_id}</p>
-                            </div>
-                            <button class="toggle-btn ${statusClass}" onclick="toggleAiForChat('${chat.chat_id}')">
-                                ${statusText}
-                            </button>
-                        `;
-                        container.appendChild(card);
-                    });
-                })
-                .catch(err => {
-                    console.error("Ошибка загрузки чатов:", err);
-                    document.getElementById('chats-container').innerHTML = '<p style="color: #e74c3c;">Ошибка загрузки списка чатов.</p>';
-                });
+        const options = { method, headers };
+        if (body) {
+            options.body = JSON.stringify(body);
         }
 
-        // 3. Переключение ИИ для конкретного чата (с проверкой лимитов на бэкенде)
-        function toggleAiForChat(chatId) {
-            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+        const response = await fetch(`${BACKEND_URL}${endpoint}`, options);
+        return await response.json();
+    }
 
-            fetch(`${BACKEND_URL}/api/toggle_ai`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    chat_id: String(chatId), 
-                    owner_id: String(ownerId) 
-                })
+    // 1. Загрузка данных о подписке и слотах
+    function loadUserSubscription() {
+        apiRequest('/api/get_user_sub')
+            .then(data => {
+                if (data.status === 'success') {
+                    const subText = data.is_active ? `🟢 PRO активен до: ${data.expires_at}` : `🔴 PRO не активен`;
+                    document.getElementById('sub-status').innerText = subText;
+                    document.getElementById('slots-status').innerText = `Использовано каналов: ${data.active_chats} из ${data.max_slots}`;
+                } else {
+                    document.getElementById('sub-status').innerText = "Не удалось загрузить статус подписки";
+                }
             })
-            .then(res => res.json())
+            .catch(err => {
+                console.error("Ошибка загрузки подписки:", err);
+                document.getElementById('sub-status').innerText = "Ошибка связи с сервером";
+            });
+    }
+
+    // 2. Загрузка списка чатов пользователя
+    function loadUserChats() {
+        apiRequest('/api/get_chats')
+            .then(data => {
+                const container = document.getElementById('chats-container');
+                container.innerHTML = '';
+
+                if (!data.chats || data.chats.length === 0) {
+                    container.innerHTML = '<p style="color: var(--tg-theme-hint-color, #aaa);">У вас пока нет подключенных чатов или каналов.</p>';
+                    return;
+                }
+
+                data.chats.forEach(chat => {
+                    const card = document.createElement('div');
+                    card.className = 'chat-card';
+
+                    const statusClass = chat.ai_enabled ? 'enabled' : 'disabled';
+                    const statusText = chat.ai_enabled ? 'Включен' : 'Выключен';
+
+                    card.innerHTML = `
+                        <div class="chat-info">
+                            <h4>${chat.chat_title || 'Без названия'}</h4>
+                            <p>ID: ${chat.chat_id}</p>
+                        </div>
+                        <button class="toggle-btn ${statusClass}" onclick="toggleAiForChat('${chat.chat_id}')">
+                            ${statusText}
+                        </button>
+                    `;
+                    container.appendChild(card);
+                });
+            })
+            .catch(err => {
+                console.error("Ошибка загрузки чатов:", err);
+                document.getElementById('chats-container').innerHTML = '<p style="color: #e74c3c;">Ошибка загрузки списка чатов.</p>';
+            });
+    }
+
+    // 3. Переключение ИИ для конкретного чата
+    function toggleAiForChat(chatId) {
+        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+
+        // Передаем только chat_id — owner_id сервер определит сам из initData
+        apiRequest('/api/toggle_ai', 'POST', { chat_id: String(chatId) })
             .then(data => {
                 if (data.status === 'success') {
                     tg.showAlert(data.ai_enabled ? 'ИИ-модератор успешно включен!' : 'ИИ-модератор выключен.');
@@ -195,18 +198,13 @@
             .catch(error => {
                 tg.showAlert('Ошибка соединения с сервером');
             });
-        }
+    }
 
-        // 4. Покупка пакета за Telegram Stars (100 звезд за +3 слота)
-        function buySubscription() {
-            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    // 4. Покупка пакета за Telegram Stars
+    function buySubscription() {
+        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
 
-            fetch(`${BACKEND_URL}/api/create_stars_invoice`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ owner_id: String(ownerId) })
-            })
-            .then(res => res.json())
+        apiRequest('/api/create_stars_invoice', 'POST', {})
             .then(data => {
                 if (data.status === 'success' && data.invoice_link) {
                     tg.openInvoice(data.invoice_link, function(status) {
@@ -223,11 +221,12 @@
             .catch(error => {
                 tg.showAlert('Ошибка соединения с сервером');
             });
-        }
+    }
 
-        // Инициализация при открытии приложения
-        loadUserSubscription();
-        loadUserChats();
-    </script>
+    // Инициализация при открытии приложения
+    loadUserSubscription();
+    loadUserChats();
+</script>
+
 </body>
 </html>
