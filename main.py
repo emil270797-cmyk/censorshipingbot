@@ -712,40 +712,32 @@ async def send_invoice(m: Message):
     )
 
 from aiogram.types import PreCheckoutQuery
+import psycopg2
+import time
 
+# 1. СТРОГИЙ ОБРАБОТЧИК PRE-CHECKOUT
 @dp.pre_checkout_query()
 async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
-    # 1. Проверяем, наш ли это payload
+    # Проверяем, наш ли это payload
     if not pre_checkout_query.invoice_payload.startswith("sub_stars_"):
-        await bot.answer_pre_checkout_query(
-            pre_checkout_query.id, 
-            ok=False, 
-            error_message="Неизвестный товар. Пожалуйста, перезапустите приложение."
-        )
+        await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message="Неизвестный товар. Пожалуйста, перезапустите приложение.")
         return
         
-    # 2. Проверяем валюту (Telegram Stars)
+    # Проверяем валюту (Telegram Stars)
     if pre_checkout_query.currency != "XTR":
-        await bot.answer_pre_checkout_query(
-            pre_checkout_query.id, 
-            ok=False, 
-            error_message="Оплата принимается только в Telegram Stars."
-        )
+        await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message="Оплата принимается только в Telegram Stars.")
         return
         
-    # 3. Проверяем точную сумму (100 Stars)
+    # Проверяем точную сумму (100 Stars)
     if pre_checkout_query.total_amount != 100:
-        await bot.answer_pre_checkout_query(
-            pre_checkout_query.id, 
-            ok=False, 
-            error_message="Неверная сумма платежа. Попробуйте еще раз."
-        )
+        await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message="Неверная сумма платежа. Попробуйте еще раз.")
         return
 
     # Если всё идеально, разрешаем оплату
     await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
 
 
+# 2. ЕДИНСТВЕННЫЙ ОБРАБОТЧИК УСПЕШНОГО ПЛАТЕЖА
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: Message):
     payment_info = message.successful_payment
@@ -797,30 +789,8 @@ async def process_successful_payment(message: Message):
             """, (owner_id, new_until, new_slots))
             
         conn.commit()
-        
         await message.answer("🎉 Оплата успешно получена! Вам добавлено 3 слота на 30 дней. Можете включать ИИ в Личном кабинете!")
 
-                
-        except Exception as e:
-            print(f"⚠️ Ошибка обработки успешного платежа: {e}")
-
-
-
-
-@dp.pre_checkout_query()
-async def pre_checkout_handler(pre_checkout_query: PreCheckoutQuery):
-    await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
-
-@dp.message(F.successful_payment)
-async def successful_payment_handler(m: Message):
-    add_chat(m.chat.id)
-    set_ai(m.chat.id, True, days=30) 
-    stars = m.successful_payment.total_amount
-    await m.answer(
-        f"🎉 <b>Спасибо за поддержку!</b> Оплата в {stars} Stars получена.\n"
-        f"✅ <b>Premium активирован на 30 дней!</b>", 
-        parse_mode="HTML"
-    )
 
 
 # --- 7. ОСНОВНОЙ ПРОЦЕСС МОДЕРАЦИИ ---
