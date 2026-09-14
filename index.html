@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Управление ИИ-Модератором</title>
-    <!-- Подключаем официальный скрипт Telegram WebApp -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body {
@@ -14,10 +13,8 @@
             margin: 0;
             padding: 16px;
         }
-        h2, h3 {
-            margin-top: 0;
-        }
-        /* Карточка статуса подписки */
+        h2, h3 { margin-top: 0; }
+        
         .sub-card {
             background: var(--tg-theme-secondary-bg-color, #222222);
             border-radius: 12px;
@@ -25,7 +22,7 @@
             margin-bottom: 20px;
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
         }
-        /* Кнопки */
+        
         .btn {
             background-color: var(--tg-theme-button-color, #2481cc);
             color: var(--tg-theme-button-text-color, #ffffff);
@@ -39,10 +36,18 @@
             margin-top: 10px;
             text-align: center;
         }
-        .btn-stars {
-            background: linear-gradient(135deg, #f39c12, #e67e22);
+        .btn-stars { background: linear-gradient(135deg, #f39c12, #e67e22); }
+        .back-btn {
+            background: transparent;
+            color: var(--tg-theme-button-color, #2481cc);
+            border: none;
+            font-size: 16px;
+            padding: 0;
+            cursor: pointer;
+            font-weight: 600;
+            margin-bottom: 15px;
         }
-        /* Карточки каналов/чатов */
+
         .chat-card {
             background: var(--tg-theme-secondary-bg-color, #222222);
             border-radius: 12px;
@@ -51,16 +56,13 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            transition: 0.2s;
         }
-        .chat-info h4 {
-            margin: 0 0 4px 0;
-            font-size: 16px;
-        }
-        .chat-info p {
-            margin: 0;
-            font-size: 13px;
-            color: var(--tg-theme-hint-color, #aaaaaa);
-        }
+        .chat-card:active { opacity: 0.7; }
+        
+        .chat-info h4 { margin: 0 0 4px 0; font-size: 16px; }
+        .chat-info p { margin: 0; font-size: 13px; color: var(--tg-theme-hint-color, #aaaaaa); }
+        
         .toggle-btn {
             padding: 8px 14px;
             border-radius: 6px;
@@ -68,111 +70,131 @@
             font-weight: 600;
             cursor: pointer;
         }
-        .enabled {
-            background-color: #27ae60;
-            color: white;
+        .enabled { background-color: #27ae60; color: white; }
+        .disabled { background-color: #c0392b; color: white; }
+
+        /* Стили для логов */
+        .log-item {
+            background: var(--tg-theme-secondary-bg-color, #222222);
+            border-left: 4px solid var(--tg-theme-button-color, #2481cc);
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            font-size: 14px;
         }
-        .disabled {
-            background-color: #c0392b;
-            color: white;
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-weight: 600;
         }
+        .log-date { font-size: 12px; color: var(--tg-theme-hint-color, #aaaaaa); font-weight: normal; }
+        .log-reason { color: #e74c3c; font-size: 13px; margin-top: 4px; }
+        .badge-premium { background: #f1c40f; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge-base { background: #7f8c8d; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+
     </style>
 </head>
 <body>
 
-    <!-- Блок статуса подписки и слотов владельца -->
-    <div id="subscription-card" class="sub-card">
-        <h3>📊 Статус PRO-подписки</h3>
-        <p id="sub-status">Загрузка данных...</p>
-        <p id="slots-status">Слоты: --</p>
-        <button class="btn btn-stars" onclick="buySubscription()">
-            ⭐ Купить пакет (+3 чата) — 100 Stars
-        </button>
+    <!-- Экран 1: Главный список -->
+    <div id="main-view">
+        <div id="subscription-card" class="sub-card">
+            <h3>📊 Статус PRO-подписки</h3>
+            <p id="sub-status">Загрузка данных...</p>
+            <p id="slots-status">Слоты: --</p>
+            <button class="btn btn-stars" onclick="buySubscription()">
+                ⭐ Купить пакет (+3 чата) — 100 Stars
+            </button>
+        </div>
+
+        <h3>Ваши чаты и каналы</h3>
+        <div id="chats-container">
+            <p style="color: var(--tg-theme-hint-color, #aaa);">Загрузка списка чатов...</p>
+        </div>
     </div>
 
-    <!-- Список чатов пользователя -->
-    <h3>Ваши чаты и каналы</h3>
-    <div id="chats-container">
-        <p style="color: var(--tg-theme-hint-color, #aaa);">Загрузка списка чатов...</p>
+    <!-- Экран 2: Детали конкретного чата -->
+    <div id="detail-view" style="display: none;">
+        <button class="back-btn" onclick="showMainView()">⬅ Назад к списку</button>
+        
+        <div class="sub-card" style="margin-top: 10px;">
+            <h3 id="detail-title" style="margin-bottom: 15px;">Загрузка...</h3>
+            <p><b>Дата добавления:</b> <span id="detail-added">...</span></p>
+            <p><b>Тариф:</b> <span id="detail-premium">...</span></p>
+            <p><b>ИИ-Модерация:</b> <span id="detail-ai">...</span></p>
+        </div>
+
+        <h3>Последние действия (до 20)</h3>
+        <div id="logs-container">
+            <p style="color: var(--tg-theme-hint-color, #aaa);">Загрузка логов...</p>
+        </div>
     </div>
 
     <script>
-    const BACKEND_URL = "https://censorshipingbot.onrender.com";
-    const tg = window.Telegram.WebApp;
-    tg.expand();
+        const BACKEND_URL = "https://censorshipingbot.onrender.com"; 
+        const tg = window.Telegram.WebApp;
+        tg.expand();
 
-    // Получаем криптографически подписанные данные запуска Mini App
-    const initData = tg.initData;
+        const initData = tg.initData;
 
-    // Общая функция для выполнения запросов с авторизацией
-    async function apiRequest(endpoint, method = 'GET', body = null) {
-        if (!initData) {
-            tg.showAlert('Ошибка: приложение запущено вне Telegram!');
-            throw new Error('No initData available');
+        async function apiRequest(endpoint, method = 'GET', body = null) {
+            if (!initData) {
+                tg.showAlert('Ошибка: приложение запущено вне Telegram!');
+                throw new Error('No initData available');
+            }
+            const headers = { 'Authorization': `tma ${initData}`, 'Content-Type': 'application/json' };
+            const options = { method, headers };
+            if (body) options.body = JSON.stringify(body);
+            
+            const response = await fetch(`${BACKEND_URL}${endpoint}`, options);
+            return await response.json();
         }
 
-        const headers = {
-            'Authorization': `tma ${initData}`,
-            'Content-Type': 'application/json'
-        };
-
-        const options = { method, headers };
-        if (body) {
-            options.body = JSON.stringify(body);
+        // Навигация между экранами
+        function showMainView() {
+            document.getElementById('detail-view').style.display = 'none';
+            document.getElementById('main-view').style.display = 'block';
+            loadUserChats(); // Обновляем список при возврате
         }
 
-        const response = await fetch(`${BACKEND_URL}${endpoint}`, options);
-        return await response.json();
-    }
+        function showDetailView() {
+            document.getElementById('main-view').style.display = 'none';
+            document.getElementById('detail-view').style.display = 'block';
+        }
 
-    // 1. Загрузка данных о подписке и слотах
-    function loadUserSubscription() {
-        apiRequest('/api/get_user_sub')
-            .then(data => {
+        function loadUserSubscription() {
+            apiRequest('/api/get_user_sub').then(data => {
                 if (data.status === 'success') {
-                    const subText = data.is_active ? `🟢 PRO активен до: ${data.expires_at}` : `🔴 PRO не активен`;
-                    document.getElementById('sub-status').innerText = subText;
+                    document.getElementById('sub-status').innerText = data.is_active ? `🟢 PRO активен до: ${data.expires_at}` : `🔴 PRO не активен`;
                     document.getElementById('slots-status').innerText = `Использовано каналов: ${data.active_chats} из ${data.max_slots}`;
-                } else {
-                    document.getElementById('sub-status').innerText = "Не удалось загрузить статус подписки";
                 }
-            })
-            .catch(err => {
-                console.error("Ошибка загрузки подписки:", err);
-                document.getElementById('sub-status').innerText = "Ошибка связи с сервером";
-            });
-    }
+            }).catch(err => console.error(err));
+        }
 
-    // 2. Загрузка списка чатов пользователя
-    function loadUserChats() {
-        apiRequest('/api/get_chats')
-            .then(data => {
+        function loadUserChats() {
+            apiRequest('/api/get_chats').then(data => {
                 const container = document.getElementById('chats-container');
                 container.innerHTML = '';
 
-                // ДОБАВЛЕННЫЙ БЛОК: показываем реальную ошибку сервера
                 if (data.status === 'error') {
-                    container.innerHTML = `<p style="color: #e74c3c;">Ошибка сервера: ${data.error}</p>`;
+                    container.innerHTML = `<p style="color: #e74c3c;">Ошибка: ${data.error}</p>`;
                     return;
                 }
-
                 if (!data.chats || data.chats.length === 0) {
-                    container.innerHTML = '<p style="color: var(--tg-theme-hint-color, #aaa);">У вас пока нет подключенных чатов или каналов.</p>';
+                    container.innerHTML = '<p style="color: var(--tg-theme-hint-color, #aaa);">У вас пока нет подключенных чатов.</p>';
                     return;
                 }
-                
-                // ... дальше идет старый код data.chats.forEach ...
-
 
                 data.chats.forEach(chat => {
                     const card = document.createElement('div');
                     card.className = 'chat-card';
-
                     const statusClass = chat.ai_enabled ? 'enabled' : 'disabled';
                     const statusText = chat.ai_enabled ? 'Включен' : 'Выключен';
 
+                    // Кликабельная область для перехода в чат, отделенная от кнопки переключения
                     card.innerHTML = `
-                        <div class="chat-info">
+                        <div class="chat-info" onclick="openChatDetails('${chat.chat_id}')" style="cursor: pointer; flex-grow: 1;">
                             <h4>${chat.chat_title || 'Без названия'}</h4>
                             <p>ID: ${chat.chat_id}</p>
                         </div>
@@ -182,60 +204,94 @@
                     `;
                     container.appendChild(card);
                 });
-            })
-            .catch(err => {
-                console.error("Ошибка загрузки чатов:", err);
-                document.getElementById('chats-container').innerHTML = '<p style="color: #e74c3c;">Ошибка загрузки списка чатов.</p>';
-            });
-    }
+            }).catch(err => console.error(err));
+        }
 
-    // 3. Переключение ИИ для конкретного чата
-    function toggleAiForChat(chatId) {
-        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
-
-        // Передаем только chat_id — owner_id сервер определит сам из initData
-        apiRequest('/api/toggle_ai', 'POST', { chat_id: String(chatId) })
-            .then(data => {
+        function toggleAiForChat(chatId) {
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+            apiRequest('/api/toggle_ai', 'POST', { chat_id: String(chatId) }).then(data => {
                 if (data.status === 'success') {
-                    tg.showAlert(data.ai_enabled ? 'ИИ-модератор успешно включен!' : 'ИИ-модератор выключен.');
+                    tg.showAlert(data.ai_enabled ? 'ИИ-модератор включен!' : 'ИИ-модератор выключен.');
                     loadUserSubscription();
                     loadUserChats();
                 } else {
-                    tg.showAlert('⚠️ ' + (data.error || 'Не удалось переключить ИИ'));
+                    tg.showAlert('⚠️ ' + (data.error || 'Ошибка'));
                 }
-            })
-            .catch(error => {
-                tg.showAlert('Ошибка соединения с сервером');
-            });
-    }
+            }).catch(err => tg.showAlert('Ошибка соединения'));
+        }
 
-    // 4. Покупка пакета за Telegram Stars
-    function buySubscription() {
-        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
-
-        apiRequest('/api/create_stars_invoice', 'POST', {})
-            .then(data => {
+        function buySubscription() {
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+            apiRequest('/api/create_stars_invoice', 'POST', {}).then(data => {
                 if (data.status === 'success' && data.invoice_link) {
                     tg.openInvoice(data.invoice_link, function(status) {
                         if (status === 'paid') {
-                            tg.showAlert('🎉 Пакет успешно куплен! Добавлено +3 слота.');
+                            tg.showAlert('🎉 Пакет куплен!');
                             loadUserSubscription();
                             loadUserChats();
                         }
                     });
                 } else {
-                    tg.showAlert('Ошибка создания счета: ' + (data.error || 'Неизвестная ошибка'));
+                    tg.showAlert('Ошибка: ' + (data.error || 'Неизвестная ошибка'));
                 }
-            })
-            .catch(error => {
-                tg.showAlert('Ошибка соединения с сервером');
             });
-    }
+        }
 
-    // Инициализация при открытии приложения
-    loadUserSubscription();
-    loadUserChats();
-</script>
+        // Загрузка деталей чата и логов
+        function openChatDetails(chatId) {
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+            showDetailView();
+            document.getElementById('detail-title').innerText = "Загрузка...";
+            document.getElementById('logs-container').innerHTML = '<p style="color: var(--tg-theme-hint-color, #aaa);">Загрузка логов...</p>';
 
+            apiRequest(`/api/chat_details?chat_id=${chatId}`).then(data => {
+                if (data.status === 'success') {
+                    document.getElementById('detail-title').innerText = data.title;
+                    document.getElementById('detail-added').innerText = data.added_at;
+                    document.getElementById('detail-premium').innerHTML = data.is_premium ? '<span class="badge-premium">PRO</span>' : '<span class="badge-base">Базовый</span>';
+                    document.getElementById('detail-ai').innerText = data.ai_enabled ? 'Включена 🟢' : 'Выключена 🔴';
+
+                    const logsContainer = document.getElementById('logs-container');
+                    logsContainer.innerHTML = '';
+
+                    if (!data.logs || data.logs.length === 0) {
+                        logsContainer.innerHTML = '<p style="color: var(--tg-theme-hint-color, #aaa);">В этом чате пока нет нарушений. Всё чисто! ✨</p>';
+                        return;
+                    }
+
+                    data.logs.forEach(log => {
+                        const item = document.createElement('div');
+                        item.className = 'log-item';
+                        
+                        // Перевод технических экшенов в читаемый вид
+                        let actionFormatted = log.action;
+                        if (actionFormatted.includes('warn_1')) actionFormatted = 'Предупреждение (1/3)';
+                        if (actionFormatted.includes('warn_2')) actionFormatted = 'Мут 5 минут (2/3)';
+                        if (actionFormatted.includes('warn_3')) actionFormatted = 'Мут 1 час (3/3)';
+
+                        item.innerHTML = `
+                            <div class="log-header">
+                                <span>👤 ${log.user_name}</span>
+                                <span class="log-date">${log.date}</span>
+                            </div>
+                            <div style="font-size: 13px;"><b>Действие:</b> ${actionFormatted}</div>
+                            <div class="log-reason"><b>Причина:</b> ${log.reason}</div>
+                        `;
+                        logsContainer.appendChild(item);
+                    });
+                } else {
+                    tg.showAlert('Ошибка: ' + data.error);
+                    showMainView();
+                }
+            }).catch(err => {
+                tg.showAlert('Ошибка загрузки данных чата');
+                showMainView();
+            });
+        }
+
+        // Инициализация
+        loadUserSubscription();
+        loadUserChats();
+    </script>
 </body>
 </html>
