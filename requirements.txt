@@ -3,7 +3,6 @@ google-generativeai
 Flask>=3.0.0
 pymorphy3
 psycopg2-binary
-apscheduler
 requests
 waitress
 
