@@ -237,6 +237,22 @@ def add_warn(user_id, chat_id):
         local_conn.commit()
         return count
 
+def is_chat_premium(chat_id: int) -> bool:
+    """Проверяет, есть ли у чата активный ИИ и оплачена ли подписка у его владельца."""
+    current_time = time.time()
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('''
+            SELECT c.ai_enabled, u.premium_until 
+            FROM chats_v2 c
+            LEFT JOIN user_subscriptions u ON c.owner_id = u.owner_id
+            WHERE c.chat_id = %s
+        ''', (chat_id,))
+        res = local_cursor.fetchone()
+        
+        if res and res[0] and res[1] and res[1] > current_time:
+            return True
+    return False
+
 def reset_warns(user_id, chat_id):
     with get_db() as (local_conn, local_cursor):
         local_cursor.execute('DELETE FROM warns WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
@@ -599,7 +615,7 @@ async def send_report(m: Message):
 
 @dp.message(Command("status"), F.chat.type.in_({"group", "supergroup"}))
 async def chat_status(m: Message):
-    # Безопасное чтение статуса подписки
+    current_time = time.time()
     with get_db() as (local_conn, local_cursor):
         local_cursor.execute('''
             SELECT c.ai_enabled, u.premium_until 
@@ -609,12 +625,19 @@ async def chat_status(m: Message):
         ''', (m.chat.id,))
         res = local_cursor.fetchone()
     
-    if res and res[0] and res[1] and res[1] > datetime.now().timestamp():
+    if res and res[0] and res[1] and res[1] > current_time:
         end_date = datetime.fromtimestamp(res[1]).strftime('%d.%m.%Y %H:%M')
         await m.answer(
             f"🌟 <b>Статус чата:</b> PREMIUM\n"
             f"🧠 <b>Нейросеть (Gemini):</b> Активна\n"
             f"⏳ <b>Оплачено до:</b> {end_date}",
+            parse_mode="HTML"
+        )
+    else:
+        await m.answer(
+            f"🌑 <b>Статус чата:</b> Базовый\n"
+            f"🤖 <b>Фильтр:</b> Стандартный словарный\n"
+            f"💡 Чтобы включить ИИ-модерацию, используйте Личный Кабинет",
             parse_mode="HTML"
         )
     else:
@@ -800,10 +823,27 @@ async def cmd_give_pro(message: Message):
         await message.answer("⚠️ Неверный формат!\nПишите так: `/givepro <id> <дней> <слотов>`\nПример: `/givepro 354584527 30 3`", parse_mode="Markdown")
         return
         
-    target_id = args[1]
-    days = int(args[2])
-    slots = int(args[3])
-    
+    try:
+        target_id = int(args[1])
+        days = int(args[2])
+        slots = int(args[3])
+    except ValueError:
+        await message.answer("❌ Ошибка: ID, количество дней и слотов должны быть целыми числами.")
+        return
+
+    # Защита от дурака (валидация диапазонов)
+    if target_id <= 0:
+        await message.answer("❌ ID пользователя должен быть положительным числом.")
+        return
+        
+    if not (1 <= days <= 3650):  # от 1 дня до 10 лет
+        await message.answer("❌ Количество дней должно быть в диапазоне от 1 до 3650.")
+        return
+        
+    if not (1 <= slots <= 100):  # от 1 до 100 слотов
+        await message.answer("❌ Количество слотов должно быть в диапазоне от 1 до 100.")
+        return
+
     current_time = int(time.time())
     premium_until = current_time + (days * 24 * 60 * 60)
     
@@ -821,8 +861,7 @@ async def cmd_give_pro(message: Message):
             
         await message.answer(f"✅ Готово! Пользователю `{target_id}` выдана PRO-подписка на {days} дней. Слотов: {slots}.", parse_mode="Markdown")
     except Exception as e:
-        # psycopg2 сам откатит транзакцию при ошибке
-        await message.answer(f"❌ Ошибка: {e}")
+        await message.answer(f"❌ Ошибка базы данных: {e}")
 
 @dp.message(Command("give_premium"))
 async def cmd_give_premium(m: Message):
