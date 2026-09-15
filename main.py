@@ -1097,7 +1097,7 @@ async def cleanup_old_logs():
             print(f"⚠️ Ошибка при очистке старых логов: {e}", flush=True)
         
         # Ждем 24 часа (86400 секунд) перед следующим запуском
-        await asyncio.sleep(86400)_
+        await asyncio.sleep(86400)
 
 
 
