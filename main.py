@@ -222,17 +222,18 @@ def is_ai(chat_id):
 
 def add_warn(user_id, chat_id):
     with get_db() as (local_conn, local_cursor):
-        local_cursor.execute('SELECT count FROM warns WHERE user_id = %s AND chat_id
-
-
-= %s', (user_id, chat_id))
+        local_cursor.execute('''
+            SELECT count FROM warns WHERE user_id = %s AND chat_id= %s
+            ''', (user_id, chat_id))
         res = local_cursor.fetchone()
         if res:
             count = res[0] + 1
             local_cursor.execute('UPDATE warns SET count = %s WHERE user_id = %s AND chat_id = %s', (count, user_id, chat_id))
         else:
             count = 1
-            local_cursor.execute('INSERT INTO warns (user_id, chat_id, count) VALUES (%s, %s, %s)', (user_id, chat_id, count))
+            local_cursor.execute('''
+                    INSERT INTO warns (user_id, chat_id, count) VALUES (%s, %s, %s)
+                ''', (user_id, chat_id, count))
         local_conn.commit()
         return count
 
