@@ -32,19 +32,8 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 import google.generativeai as genai
 genai.configure(api_key=GEMINI_KEY)
 
-# --- УЗНАЕМ ДОСТУПНЫЕ МОДЕЛИ ---
-print("=== ДОСТУПНЫЕ МОДЕЛИ GEMINI ===", flush=True)
-try:
-    for m in genai.list_models():
-        if 'generateContent' in m.supported_generation_methods:
-            print(m.name, flush=True)
-except Exception as e:
-    print(f"Ошибка получения списка: {e}", flush=True)
-print("===============================", flush=True)
-
 # Пока ставим любое название, чтобы код прошел дальше
 model = genai.GenerativeModel('gemini-3.8-flash')
-chat_session = model.start_chat(history=[])
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -378,7 +367,7 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
         Сообщение: {safe_text}
         """
 
-        response = chat_session.send_message(prompt)
+        response = await model.generate_content_async(prompt)
         result = response.text.strip().lower()
 
         # Очищаем ответ от лишних знаков препинания, если ИИ вдруг их добавит
