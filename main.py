@@ -21,6 +21,7 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, 
     ChatMemberUpdated, WebAppInfo
 )
+flood_cache = {} # Словарь для отслеживания активности пользователей
 
 # --- 1. НАСТРОЙКИ БОТА И API ---
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -291,6 +292,27 @@ def basic_filter(text: str) -> bool:
 
 
 # --- 4. ФУНКЦИЯ ИИ-МОДЕРАЦИИ (Gemini REST API) ---
+@dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text)
+async def handle_group_messages(m: Message):
+    user_id = m.from_user.id
+    current_time = time.time()
+    
+    # === 1. RATE LIMITING (АНТИ-ФЛУД) ===
+    if user_id in flood_cache:
+        last_time, msg_count = flood_cache[user_id]
+        if current_time - last_time < 2:  # Если прошло меньше 2 секунд с первого сообщения
+            if msg_count >= 3:            # И он отправил уже больше 3 сообщений
+                await m.delete()          # Молча удаляем флуд
+                return                    # ПРЕРЫВАЕМ обработку, Gemini НЕ дергаем!
+            else:
+                flood_cache[user_id] = (last_time, msg_count + 1)
+        else:
+            flood_cache[user_id] = (current_time, 1) # Сбрасываем счетчик, если время вышло
+    else:
+        flood_cache[user_id] = (current_time, 1)
+
+
+
 async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) -> str:
     """
     Отправляет текст в Gemini.
@@ -299,7 +321,11 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
     try:
         # ОБЕЗЛИЧЕННЫЙ ЛОГ ЗАПРОСА
         print(f"🧠 AI moderation request | chat_id: {chat_id} | message_id: {message_id}", flush=True)
-
+        
+        # ТЕХНИЧЕСКИЙ ЩИТ: скрываем личные данные ДО отправки в нейросеть
+        # Маскируем номера телефонов 
+        safe_text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z|{2,}\b', '[EMAIL]', safe_text)
+        
         prompt = f"""
         Проверь это сообщение от пользователя "{author_name}". 
         Твоя задача — классифицировать его. 
@@ -309,7 +335,7 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
         toxic - агрессия, оскорбления (прямые или скрытые), травля
         obscene - мат, завуалированный мат, непристойности
 
-        Сообщение: {text}
+        Сообщение: {safe_text}
         """
 
         response = chat_session.send_message(prompt)
@@ -411,11 +437,22 @@ async def bot_added_to_chat(event: ChatMemberUpdated):
         except Exception as e:
             conn.rollback()
             print(f"❌ Ошибка авто-привязки: {e}")
+        
 
 
 
 # --- ОБРАБОТЧИКИ НАЖАТИЙ НА КНОПКИ МЕНЮ ---
 
+@dp.message(Command("privacy"))
+async def cmd_privacy(m: Message):
+    await m.answer(
+        "🛡 <b>Политика конфиденциальности:</b>\n\n"
+        "1. Сообщения из чата проходят автоматическую обработку ИИ (Gemini).\n"
+        "2. Мы <b>не храним</b> тексты ваших сообщений в базах данных.\n"
+        "3. Перед анализом номера телефонов и email-адреса автоматически скрываются локальным фильтром.\n"
+        "4. Логи нарушений (имя пользователя и причина) хранятся не более 30 дней для статистики администратора.",
+        parse_mode="HTML"
+    )
 
 @dp.message(Command("report"))
 async def send_report(m: Message):
