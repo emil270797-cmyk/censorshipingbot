@@ -32,7 +32,8 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 import google.generativeai as genai
 genai.configure(
     api_key=GEMINI_KEY,
-    client_options={"api_endpoint": "https://api.proxyapi.ru/google/v1beta"}
+    transport="rest", # Принудительно отключаем gRPC и включаем REST
+    client_options={"api_endpoint": "api.proxyapi.ru/google"} # Пишем адрес без https:// и без /v1beta
 )
 
 model = genai.GenerativeModel('gemini-3.6-flash')
