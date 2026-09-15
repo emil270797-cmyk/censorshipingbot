@@ -1053,11 +1053,59 @@ def telegram_auth_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+from functools import wraps
+from flask import request, jsonify
+import time
+
+# Словарь для хранения истории API запросов: {ip_address: [timestamp1, timestamp2, ...]}
+api_request_history = {}
+
+def api_rate_limit(limit=60, per=60): 
+    """
+    Блокирует IP-адрес, если он делает больше 'limit' запросов за 'per' секунд.
+    """
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            # Для служебных OPTIONS (CORS) запросов лимит не нужен
+            if request.method == 'OPTIONS':
+                return f(*args, **kwargs)
+        
+            # Получаем реальный IP клиента (Render прячет его за прокси X-Forwarded-For)
+            ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+            if ip:
+                ip = ip.split(',')[0].strip()
+            else:
+                ip = "unknown"
+
+            current_time = time.time()
+
+            if ip not in api_request_history:
+                api_request_history[ip] = []
+
+            # Очищаем старые запросы, которые вышли за рамки нашего временного окна (например, старше 60 сек)
+            api_request_history[ip] = [t for t in api_request_history[ip] if current_time - t < per]
+
+            # Если запросов слишком много — бьем по рукам
+            if len(api_request_history[ip]) >= limit:
+                print(f"🛑 БЛОКИРОВКА API (DDoS): IP {ip} превысил лимит запросов", flush=True)
+                response = jsonify({"status": "error", "error": "Слишком много запросов. Подождите минуту."})
+                # Если у вас есть функция add_cors(response), оберните в нее: return add_cors(response), 429
+                return response, 429
+
+            # Фиксируем новый легальный запрос
+            api_request_history[ip].append(current_time)
+
+            return f(*args, **kwargs)
+    return wrapped
+return decorator
+
 @app.route('/')
 def home():
     return "Бот-модератор работает!"
 
 @app.route('/api/get_chats', methods=['GET', 'OPTIONS'])
+@api_rate_limit(limit=60, per=60)
 @telegram_auth_required
 def api_get_chats():
     if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
@@ -1076,6 +1124,7 @@ def api_get_chats():
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
 @app.route('/api/get_user_sub', methods=['GET', 'OPTIONS'])
+@api_rate_limit(limit=60, per=60)
 @telegram_auth_required
 def api_get_user_sub():
     if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
@@ -1112,6 +1161,7 @@ def api_get_user_sub():
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
 @app.route('/api/toggle_ai', methods=['POST', 'OPTIONS'])
+@api_rate_limit(limit=60, per=60)
 @telegram_auth_required
 def api_toggle_ai():
     if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
@@ -1163,6 +1213,7 @@ def api_toggle_ai():
 
 
 @app.route('/api/create_stars_invoice', methods=['POST', 'OPTIONS'])
+@api_rate_limit(limit=60, per=60)
 @telegram_auth_required
 def api_create_stars_invoice():
     if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
@@ -1189,6 +1240,7 @@ def api_create_stars_invoice():
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
 @app.route('/api/chat_details', methods=['GET', 'OPTIONS'])
+@api_rate_limit(limit=60, per=60)
 @telegram_auth_required
 def api_chat_details():
     if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
