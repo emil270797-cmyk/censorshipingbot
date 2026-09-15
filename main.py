@@ -28,12 +28,15 @@ from aiogram.types import (
 TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Инициализация и запуск Gemini
+# Инициализация и запуск Gemini через агрегатор ProxyAPI
 import google.generativeai as genai
-genai.configure(api_key=GEMINI_KEY)
+genai.configure(
+    api_key=GEMINI_KEY,
+    client_options={"api_endpoint": "https://api.proxyapi.ru/google/v1beta"}
+)
 
-# Пока ставим любое название, чтобы код прошел дальше
 model = genai.GenerativeModel('gemini-3.6-flash')
+
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
