@@ -925,6 +925,29 @@ def check_expiring_subscriptions():
     except Exception as e:
         print(f"Ошибка в фоновой задаче проверки подписок: {e}")
 
+import asyncio
+
+async def cleanup_old_logs():
+    """
+    Фоновая задача: раз в сутки удаляет логи модерации старше 30 дней.
+    """
+    while True:
+        try:
+            with conn.cursor() as cur:
+                # Удаляем записи старше 30 дней
+                cur.execute("DELETE FROM moderation_logs WHERE created_at < NOW() - INTERVAL '30 days'")
+                deleted_count = cur.rowcount
+                conn.commit()
+                if deleted_count > 0:
+                    print(f"🧹 Очистка БД: удалено {deleted_count} старых логов модерации.", flush=True)
+        except Exception as e:
+            conn.rollback()
+            print(f"⚠️ Ошибка при очистке старых логов: {e}", flush=True)
+        
+        # Ждем 24 часа (86400 секунд) перед следующим запуском
+        await asyncio.sleep(86400)
+
+
 
 # --- 8. ЗАПУСК БОТА И ВЕБ-СЕРВЕРА ---
 # --- БЛОК FLASK WEB-SERVER И API ---
@@ -1199,16 +1222,16 @@ def run_web():
 
 
 async def main():
-    # Запускаем веб-сервер в фоне
-    web_thread = Thread(target=run_web, daemon=True)
-    web_thread.start()
+    import threading
+    # Запускаем веб-сервер (Waitress) в отдельном потоке
+    threading.Thread(target=run_web, daemon=True).start()
     
-
-
+    # Запускаем фоновую задачу очистки старых логов
+    asyncio.create_task(cleanup_old_logs())
     
-    
-    # Запуск самого бота
+    print("Бот запущен и готов к работе!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
