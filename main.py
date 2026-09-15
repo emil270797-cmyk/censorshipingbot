@@ -131,18 +131,15 @@ def init_db():
             local_cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS owner_id BIGINT')
             local_cursor.execute("ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
             local_cursor.execute('ALTER TABLE stats ADD COLUMN IF NOT EXISTS ai_requests INTEGER DEFAULT 0')
-            local_conn.commit()
-        except Exception:
-            local_conn.rollback() # Откат в случае, если колонки уже есть, чтобы транзакция не зависла
             
-        # Привязка старых чатов
-        try:
-            local_cursor.execute("UPDATE chats_v2 SET owner_id = 354584527 WHERE owner_id IS NULL;")
+            # --- ДОБАВЛЯЕМ НЕДОСТАЮЩИЕ КОЛОНКИ ДЛЯ ЛИМИТОВ ИИ ---
+            local_cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS ai_requests_today INTEGER DEFAULT 0')
+            local_cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS last_request_date DATE DEFAULT CURRENT_DATE')
+            
             local_conn.commit()
-            print("База данных успешно инициализирована и проверена.")
         except Exception as e:
-            local_conn.rollback()
-            print(f"Ошибка при привязке старых чатов: {e}")
+            local_conn.rollback() # Откат в случае, если колонки уже есть, чтобы транзакция не зависла
+            print(f"Ошибка при обновлении таблиц: {e}")
 
 # Вызываем функцию создания таблиц сразу при старте файла
 init_db()
