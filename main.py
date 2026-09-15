@@ -33,7 +33,7 @@ import google.generativeai as genai
 genai.configure(api_key=GEMINI_KEY)
 
 # Пока ставим любое название, чтобы код прошел дальше
-model = genai.GenerativeModel('gemini-3.8-flash')
+model = genai.GenerativeModel('gemini-3.6-flash')
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
