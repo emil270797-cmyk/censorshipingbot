@@ -381,9 +381,11 @@ async def handle_group_messages(m: Message):
     chat_id = m.chat.id
     current_time = time.time()
     
-    # === 1. RATE LIMITING (АНТИ-ФЛУД) ===
-    if user_id in flood_cache:
-        last_time, msg_count = flood_cache[user_id]
+    # === 1. RATE LIMITING (АНТИ-ФЛУД С ПРИВЯЗКОЙ К ЧАТУ) ===
+    cache_key = (chat_id, user_id) # Ключ теперь уникален для парой (чат + юзер)
+    
+    if cache_key in flood_cache:
+        last_time, msg_count = flood_cache[cache_key]
         if current_time - last_time < 2:  # Если прошло меньше 2 секунд
             if msg_count >= 3:            # И отправлено больше 3 сообщений
                 try:
@@ -392,11 +394,11 @@ async def handle_group_messages(m: Message):
                     pass
                 return                    # ПРЕРЫВАЕМ обработку
             else:
-                flood_cache[user_id] = (last_time, msg_count + 1)
+                flood_cache[cache_key] = (last_time, msg_count + 1)
         else:
-            flood_cache[user_id] = (current_time, 1)
+            flood_cache[cache_key] = (current_time, 1)
     else:
-        flood_cache[user_id] = (current_time, 1)
+        flood_cache[cache_key] = (current_time, 1)
 
     # === 2. ПРОВЕРКА СООБЩЕНИЯ (МОДЕРАЦИЯ) ===
     reason = None
