@@ -192,9 +192,13 @@ def set_ai(chat_id, status, days=30):
     cursor.execute('UPDATE chats_v2 SET ai_enabled = %s, premium_until = %s WHERE chat_id = %s', (status, until, chat_id))
 
 def is_ai(chat_id):
-    # Теперь мы берем ai_enabled из чата, а premium_until - из подписки владельца
+    """
+    Проверяет, включен ли ИИ, активна ли подписка владельца и не превышен ли суточный лимит (1000 запросов).
+    """
+    DAILY_AI_LIMIT = 1000 # Лимит проверок в сутки на один чат
+
     cursor.execute('''
-        SELECT c.ai_enabled, u.premium_until 
+        SELECT c.ai_enabled, u.premium_until, c.ai_requests_today, c.last_request_date
         FROM chats_v2 c
         LEFT JOIN user_subscriptions u ON c.owner_id = u.owner_id
         WHERE c.chat_id = %s
@@ -203,14 +207,35 @@ def is_ai(chat_id):
     
     if res and res[0]:  # Если тумблер включен
         premium_until = res[1] or 0
-        if datetime.now().timestamp() < premium_until:
-            return True
-        else:
-            # Если подписка владельца закончилась, выключаем ИИ в чате
+        requests_today = res[2] or 0
+        last_date = res[3]
+
+        current_date = datetime.now().date()
+
+        # 1. Проверяем, не закончилась ли подписка владельца
+        if datetime.now().timestamp() > premium_until:
             cursor.execute('UPDATE chats_v2 SET ai_enabled = FALSE WHERE chat_id = %s', (chat_id,))
             conn.commit()
             return False
+
+        # 2. Проверяем и сбрасываем суточный счетчик, если наступил новый день
+        if last_date != current_date:
+            requests_today = 0
+            cursor.execute('UPDATE chats_v2 SET ai_requests_today = 0, last_request_date = CURRENT_DATE WHERE chat_id = %s', (chat_id,))
+            conn.commit()
+
+        # 3. Проверяем лимит
+        if requests_today >= DAILY_AI_LIMIT:
+            # Лимит исчерпан. Бот молча вернет False и проверит сообщение обычным словарем (бесплатно)
+            return False
+            
+        # 4. Если всё ок, плюсуем счетчик на 1 и разрешаем доступ к Gemini
+        cursor.execute('UPDATE chats_v2 SET ai_requests_today = ai_requests_today + 1 WHERE chat_id = %s', (chat_id,))
+        conn.commit()
+        return True
+
     return False
+
 
 
 def add_warn(user_id, chat_id):
