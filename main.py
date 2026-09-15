@@ -128,7 +128,7 @@ def init_db():
         # Безопасное добавление колонок (если они еще не существуют)
         try:
             local_cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS chat_title TEXT')
-            local_cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS owner_id BIGINT;")
+            local_cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS owner_id BIGINT')
             local_cursor.execute("ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
             local_cursor.execute('ALTER TABLE stats ADD COLUMN IF NOT EXISTS ai_requests INTEGER DEFAULT 0')
             local_conn.commit()
