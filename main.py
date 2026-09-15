@@ -389,6 +389,9 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}), F.text)
 async def handle_group_messages(m: Message):
+    if m.text.startswith('/'):
+        return #
+    
     user_id = m.from_user.id
     chat_id = m.chat.id
     current_time = time.time()
@@ -1093,10 +1096,8 @@ async def punish(m: Message, reason: str):
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}", flush=True)
 
-@dp.edited_message(F.chat.type.in_({"group", "supergroup"}))
-@dp.message(F.chat.type.in_({"group", "supergroup"}))
-async def handle_messages(m: Message):
-    if not m.text or m.is_automatic_forward: return
+
+
 
     # Передаем ID и актуальное название чата (функция add_chat уже безопасна)
     add_chat(m.chat.id, m.chat.title or "Без названия")
