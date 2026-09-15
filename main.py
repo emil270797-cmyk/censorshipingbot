@@ -371,7 +371,9 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
         Сообщение: {safe_text}
         """
 
-        response = await model.generate_content_async(prompt)
+                # Выполняем синхронный запрос в отдельном потоке (безопасно для aiogram)
+        response = await asyncio.to_thread(model.generate_content, prompt)
+
         result = response.text.strip().lower()
 
         # Очищаем ответ от лишних знаков препинания, если ИИ вдруг их добавит
