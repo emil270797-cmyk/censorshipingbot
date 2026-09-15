@@ -37,6 +37,8 @@
             text-align: center;
         }
         .btn-stars { background: linear-gradient(135deg, #f39c12, #e67e22); }
+        .btn-admin { background: linear-gradient(135deg, #8e44ad, #9b59b6); } /* Фиолетовая админская кнопка */
+
         .back-btn {
             background: transparent;
             color: var(--tg-theme-button-color, #2481cc);
@@ -58,7 +60,7 @@
             align-items: center;
             transition: 0.2s;
         }
-        .chat-card:active { opacity: 0.7; }
+        .chat-card.clickable:active { opacity: 0.7; }
         
         .chat-info h4 { margin: 0 0 4px 0; font-size: 16px; }
         .chat-info p { margin: 0; font-size: 13px; color: var(--tg-theme-hint-color, #aaaaaa); }
@@ -92,7 +94,6 @@
         .log-reason { color: #e74c3c; font-size: 13px; margin-top: 4px; }
         .badge-premium { background: #f1c40f; color: #000; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold; }
         .badge-base { background: #7f8c8d; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-
     </style>
 </head>
 <body>
@@ -106,6 +107,7 @@
             <button class="btn btn-stars" onclick="buySubscription()">
                 ⭐ Купить пакет (+3 чата) — 100 Stars
             </button>
+            <!-- Сюда динамически добавится кнопка админа -->
         </div>
 
         <h3>Ваши чаты и каналы</h3>
@@ -131,6 +133,20 @@
         </div>
     </div>
 
+    <!-- Экран 3: ПАНЕЛЬ АДМИНИСТРАТОРА -->
+    <div id="admin-view" style="display: none;">
+        <button class="back-btn" onclick="showMainView()">⬅ Назад в кабинет</button>
+        
+        <div class="sub-card" style="margin-top: 10px;">
+            <h3 style="margin-bottom: 5px;">👑 Панель Администратора</h3>
+            <p style="font-size: 13px; color: var(--tg-theme-hint-color, #aaa); margin: 0;">Мониторинг всех чатов в системе</p>
+        </div>
+
+        <div id="admin-chats-container">
+            <p style="color: var(--tg-theme-hint-color, #aaa);">Загрузка всех чатов...</p>
+        </div>
+    </div>
+
     <script>
         const BACKEND_URL = "https://censorshipingbot.onrender.com"; 
         const tg = window.Telegram.WebApp;
@@ -151,40 +167,45 @@
             return await response.json();
         }
 
-        // Навигация между экранами
+        // --- НАВИГАЦИЯ ---
         function showMainView() {
             document.getElementById('detail-view').style.display = 'none';
+            document.getElementById('admin-view').style.display = 'none';
             document.getElementById('main-view').style.display = 'block';
-            loadUserChats(); // Обновляем список при возврате
+            loadUserChats();
         }
 
         function showDetailView() {
             document.getElementById('main-view').style.display = 'none';
+            document.getElementById('admin-view').style.display = 'none';
             document.getElementById('detail-view').style.display = 'block';
         }
-
-        function loadUserSubscription() {
-    apiRequest('/api/get_user_sub').then(data => {
-        if (data.status === 'success') {
-            document.getElementById('sub-status').innerText = data.is_active ? `🟢 PRO активен до: ${data.expires_at}` : `🔴 PRO не активен`;
-            document.getElementById('slots-status').innerText = `Использовано каналов: ${data.active_chats} из ${data.max_slots}`;
-            
-            // Если зашел админ, показываем скрытую кнопку
-            if (data.is_admin) {
-                // Если кнопки еще нет, создаем её
-                if (!document.getElementById('admin-btn')) {
-                    const adminBtn = document.createElement('button');
-                    adminBtn.id = 'admin-btn';
-                    adminBtn.className = 'btn';
-                    adminBtn.style.backgroundColor = '#8e44ad'; // Фиолетовая кнопка
-                    adminBtn.innerText = '👑 Панель Администратора';
-                    adminBtn.onclick = openAdminPanel; // Функция, которая вызовет /api/admin/all_chats
-                    document.getElementById('subscription-card').appendChild(adminBtn);
-                }
-            }
+        
+        function showAdminView() {
+            document.getElementById('main-view').style.display = 'none';
+            document.getElementById('detail-view').style.display = 'none';
+            document.getElementById('admin-view').style.display = 'block';
         }
-    }).catch(err => console.error(err));
-}
+
+        // --- ЛОГИКА КАБИНЕТА ---
+        function loadUserSubscription() {
+            apiRequest('/api/get_user_sub').then(data => {
+                if (data.status === 'success') {
+                    document.getElementById('sub-status').innerText = data.is_active ? `🟢 PRO активен до: ${data.expires_at}` : `🔴 PRO не активен`;
+                    document.getElementById('slots-status').innerText = `Использовано каналов: ${data.active_chats} из ${data.max_slots}`;
+                    
+                    // Показываем кнопку админа, если бэкенд дал добро
+                    if (data.is_admin && !document.getElementById('admin-btn')) {
+                        const adminBtn = document.createElement('button');
+                        adminBtn.id = 'admin-btn';
+                        adminBtn.className = 'btn btn-admin';
+                        adminBtn.innerText = '👑 Панель Администратора';
+                        adminBtn.onclick = openAdminPanel;
+                        document.getElementById('subscription-card').appendChild(adminBtn);
+                    }
+                }
+            }).catch(err => console.error(err));
+        }
 
         function loadUserChats() {
             apiRequest('/api/get_chats').then(data => {
@@ -202,11 +223,10 @@
 
                 data.chats.forEach(chat => {
                     const card = document.createElement('div');
-                    card.className = 'chat-card';
+                    card.className = 'chat-card clickable';
                     const statusClass = chat.ai_enabled ? 'enabled' : 'disabled';
                     const statusText = chat.ai_enabled ? 'Включен' : 'Выключен';
 
-                    // Кликабельная область для перехода в чат, отделенная от кнопки переключения
                     card.innerHTML = `
                         <div class="chat-info" onclick="openChatDetails('${chat.chat_id}')" style="cursor: pointer; flex-grow: 1;">
                             <h4>${chat.chat_title || 'Без названия'}</h4>
@@ -251,7 +271,7 @@
             });
         }
 
-        // Загрузка деталей чата и логов
+        // --- ДЕТАЛИ ЧАТА ---
         function openChatDetails(chatId) {
             if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
             showDetailView();
@@ -277,7 +297,6 @@
                         const item = document.createElement('div');
                         item.className = 'log-item';
                         
-                        // Перевод технических экшенов в читаемый вид
                         let actionFormatted = log.action;
                         if (actionFormatted.includes('warn_1')) actionFormatted = 'Предупреждение (1/3)';
                         if (actionFormatted.includes('warn_2')) actionFormatted = 'Мут 5 минут (2/3)';
@@ -303,9 +322,56 @@
             });
         }
 
+        // --- ЛОГИКА ПАНЕЛИ АДМИНА ---
+        function openAdminPanel() {
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+            showAdminView();
+            
+            const container = document.getElementById('admin-chats-container');
+            container.innerHTML = '<p style="color: var(--tg-theme-hint-color, #aaa);">Загрузка аналитики...</p>';
+
+            apiRequest('/api/admin/all_chats').then(data => {
+                container.innerHTML = '';
+                
+                if (data.status === 'error') {
+                    container.innerHTML = `<p style="color: #e74c3c;">Ошибка доступа: ${data.error}</p>`;
+                    return;
+                }
+                
+                if (!data.chats || data.chats.length === 0) {
+                    container.innerHTML = '<p style="color: var(--tg-theme-hint-color, #aaa);">В системе пока нет активных чатов.</p>';
+                    return;
+                }
+
+                data.chats.forEach(chat => {
+                    const card = document.createElement('div');
+                    card.className = 'chat-card'; // Без класса clickable
+                    const statusClass = chat.ai_enabled ? 'enabled' : 'disabled';
+                    const statusText = chat.ai_enabled ? 'Вкл' : 'Выкл';
+
+                    // Карточка для админа только для просмотра (без перехода внутрь)
+                    card.innerHTML = `
+                        <div class="chat-info" style="flex-grow: 1;">
+                            <h4>${chat.chat_title}</h4>
+                            <p>ID: ${chat.chat_id}</p>
+                            <p>Запросов ИИ: <b style="color: var(--tg-theme-button-color, #2481cc);">${chat.ai_requests}</b></p>
+                        </div>
+                        <span class="toggle-btn ${statusClass}" style="cursor: default; font-size: 12px; padding: 6px 10px;">
+                            ${statusText}
+                        </span>
+                    `;
+                    container.appendChild(card);
+                });
+            }).catch(err => {
+                container.innerHTML = '<p style="color: #e74c3c;">Ошибка загрузки</p>';
+                console.error(err);
+            });
+        }
+
         // Инициализация
         loadUserSubscription();
         loadUserChats();
     </script>
 </body>
 </html>
+
