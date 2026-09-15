@@ -43,7 +43,7 @@ except Exception as e:
 print("===============================", flush=True)
 
 # Пока ставим любое название, чтобы код прошел дальше
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-3.8-flash')
 chat_session = model.start_chat(history=[])
 
 bot = Bot(token=TOKEN)
