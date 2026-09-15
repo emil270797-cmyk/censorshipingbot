@@ -1133,6 +1133,18 @@ def validate_telegram_data(init_data: str, bot_token: str):
         if "hash" not in parsed_data:
             return None
             
+        # === ПРОВЕРКА ВОЗРАСТА initData (Защита от Replay-атак) ===
+        auth_date = parsed_data.get("auth_date")
+        if not auth_date:
+            return None
+            
+        # Устанавливаем лимиты: токен живет 24 часа (86400 секунд)
+        # 5 минут (300 сек) для Mini App слишком мало — будет ломать сессии пользователей
+        if time.time() - int(auth_date) > 86400:
+            print("⚠️ Срок действия initData истек (больше 24 часов)", flush=True)
+            return None
+        # ========================================================
+            
         received_hash = parsed_data.pop("hash")
         data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed_data.items()))
         
