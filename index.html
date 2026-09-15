@@ -164,13 +164,27 @@
         }
 
         function loadUserSubscription() {
-            apiRequest('/api/get_user_sub').then(data => {
-                if (data.status === 'success') {
-                    document.getElementById('sub-status').innerText = data.is_active ? `🟢 PRO активен до: ${data.expires_at}` : `🔴 PRO не активен`;
-                    document.getElementById('slots-status').innerText = `Использовано каналов: ${data.active_chats} из ${data.max_slots}`;
+    apiRequest('/api/get_user_sub').then(data => {
+        if (data.status === 'success') {
+            document.getElementById('sub-status').innerText = data.is_active ? `🟢 PRO активен до: ${data.expires_at}` : `🔴 PRO не активен`;
+            document.getElementById('slots-status').innerText = `Использовано каналов: ${data.active_chats} из ${data.max_slots}`;
+            
+            // Если зашел админ, показываем скрытую кнопку
+            if (data.is_admin) {
+                // Если кнопки еще нет, создаем её
+                if (!document.getElementById('admin-btn')) {
+                    const adminBtn = document.createElement('button');
+                    adminBtn.id = 'admin-btn';
+                    adminBtn.className = 'btn';
+                    adminBtn.style.backgroundColor = '#8e44ad'; // Фиолетовая кнопка
+                    adminBtn.innerText = '👑 Панель Администратора';
+                    adminBtn.onclick = openAdminPanel; // Функция, которая вызовет /api/admin/all_chats
+                    document.getElementById('subscription-card').appendChild(adminBtn);
                 }
-            }).catch(err => console.error(err));
+            }
         }
+    }).catch(err => console.error(err));
+}
 
         function loadUserChats() {
             apiRequest('/api/get_chats').then(data => {
