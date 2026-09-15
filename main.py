@@ -7,7 +7,10 @@ import pymorphy3
 import hmac
 import hashlib
 import json
+import time
 
+from psycopg2 import pool
+from contextlib import contextmanager
 from urllib.parse import parse_qsl, unquote
 from functools import wraps
 from datetime import timedelta, datetime
@@ -15,13 +18,11 @@ from threading import Thread
 from flask import Flask
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-# Я почистил импорты и добавил нужный WebAppInfo
 from aiogram.types import (
     Message, LabeledPrice, PreCheckoutQuery, ChatPermissions, 
     InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, 
     ChatMemberUpdated, WebAppInfo
 )
-flood_cache = {} # Словарь для отслеживания активности пользователей
 
 # --- 1. НАСТРОЙКИ БОТА И API ---
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -29,20 +30,16 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
+flood_cache = {} # Словарь для отслеживания активности пользователей
 
-# --- 2. БАЗА ДАННЫХ ---
+# --- 2. БАЗА ДАННЫХ И ПУЛ СОЕДИНЕНИЙ ---
 DB_URL = os.environ.get("DATABASE_URL")
-
-import psycopg2
-from psycopg2 import pool
-from contextlib import contextmanager
-import os
 
 # 1. Создаем пул на 20 одновременных подключений
 db_pool = psycopg2.pool.ThreadedConnectionPool(
     minconn=1,
     maxconn=20,
-    dsn=os.environ.get("DATABASE_URL")
+    dsn=DB_URL
 )
 
 # 2. Создаем удобный "менеджер контекста" для получения курсора
@@ -55,168 +52,140 @@ def get_db():
     finally:
         db_pool.putconn(conn)
 
-conn.autocommit = True
-cursor = conn.cursor()
-
-# --- Обновляем создание таблицы в начале файла ---
-cursor.execute('''CREATE TABLE IF NOT EXISTS chats_v2 (
-    chat_id BIGINT PRIMARY KEY, 
-    ai_enabled BOOLEAN DEFAULT FALSE,
-    premium_until DOUBLE PRECISION DEFAULT 0,
-    chat_title TEXT
-)''')
-
-# Безопасное добавление колонки, если таблица уже была создана раньше
-try:
-    cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS chat_title TEXT')
-except Exception:
-    pass
-
-# Автоматическое добавление колонки owner_id, если её еще нет
-try:
-    cursor.execute("ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS owner_id BIGINT;")
-    conn.commit()
-    print("Колонка owner_id успешно проверена/добавлена.")
-except Exception as e:
-    conn.rollback()
-    print(f"Ошибка при добавлении колонки: {e}")
-
-try:
-    cursor.execute("ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
-    conn.commit()
-except Exception:
-    pass
-
-try:
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS payments (
-            id SERIAL PRIMARY KEY,
-            telegram_payment_charge_id VARCHAR(255) UNIQUE NOT NULL,
-            user_id BIGINT NOT NULL,
-            payload VARCHAR(255) NOT NULL,
-            amount INTEGER NOT NULL,
-            currency VARCHAR(10) NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    ''')
-    conn.commit()
-except Exception as e:
-    print(f"Ошибка создания таблицы payments: {e}")
-
-
-
-# Создаем таблицу подписок владельцев, если её еще нет
-try:
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_subscriptions (
-            owner_id BIGINT PRIMARY KEY,
+# --- 3. ИНИЦИАЛИЗАЦИЯ ТАБЛИЦ ---
+def init_db():
+    """Проверяет и создает все нужные таблицы при запуске бота."""
+    with get_db() as (local_conn, local_cursor):
+        # Базовые таблицы
+        local_cursor.execute('''CREATE TABLE IF NOT EXISTS chats_v2 (
+            chat_id BIGINT PRIMARY KEY, 
+            ai_enabled BOOLEAN DEFAULT FALSE,
             premium_until DOUBLE PRECISION DEFAULT 0,
-            slots INT DEFAULT 3
-        );
-    """)
-    conn.commit()
-    print("Таблица user_subscriptions успешно проверена/создана.")
-except Exception as e:
-    conn.rollback()
-    print(f"Ошибка при создании таблицы user_subscriptions: {e}")
+            chat_title TEXT
+        )''')
+        
+        local_cursor.execute('''CREATE TABLE IF NOT EXISTS warns (
+            user_id BIGINT, 
+            chat_id BIGINT, 
+            count INTEGER,
+            UNIQUE(user_id, chat_id)
+        )''')
 
-try:
-    cursor.execute("UPDATE chats_v2 SET owner_id = 354584527 WHERE owner_id IS NULL;")
-    conn.commit()
-    print("Старые чаты успешно привязаны к владельцу!")
-except Exception as e:
-    conn.rollback()
-    print(f"Ошибка при привязке чатов: {e}")
+        local_cursor.execute('''CREATE TABLE IF NOT EXISTS stats (
+            chat_id BIGINT PRIMARY KEY, 
+            deleted_count INTEGER DEFAULT 0, 
+            mute_count INTEGER DEFAULT 0,
+            ai_requests INTEGER DEFAULT 0
+        )''')
 
+        local_cursor.execute('''CREATE TABLE IF NOT EXISTS moderation_logs (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            user_id BIGINT,
+            user_name TEXT,
+            reason TEXT,
+            action_type TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        local_cursor.execute('''CREATE TABLE IF NOT EXISTS chat_admins (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            admin_id BIGINT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(chat_id, admin_id)
+        )''')
 
+        local_cursor.execute('''CREATE TABLE IF NOT EXISTS processed_txs (
+            tx_hash TEXT PRIMARY KEY,
+            chat_id BIGINT
+        )''')
 
+        # Таблица платежей Stars
+        local_cursor.execute('''
+            CREATE TABLE IF NOT EXISTS payments (
+                id SERIAL PRIMARY KEY,
+                telegram_payment_charge_id VARCHAR(255) UNIQUE NOT NULL,
+                user_id BIGINT NOT NULL,
+                payload VARCHAR(255) NOT NULL,
+                amount INTEGER NOT NULL,
+                currency VARCHAR(10) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ''')
+
+        # Таблица подписок
+        local_cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_subscriptions (
+                owner_id BIGINT PRIMARY KEY,
+                premium_until DOUBLE PRECISION DEFAULT 0,
+                slots INT DEFAULT 3
+            );
+        """)
+        
+        local_conn.commit()
+
+        # Безопасное добавление колонок (если они еще не существуют)
+        try:
+            local_cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS chat_title TEXT')
+            local_cursor.execute('ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS owner_id BIGINT;")
+            local_cursor.execute("ALTER TABLE chats_v2 ADD COLUMN IF NOT EXISTS added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+            local_cursor.execute('ALTER TABLE stats ADD COLUMN IF NOT EXISTS ai_requests INTEGER DEFAULT 0')
+            local_conn.commit()
+        except Exception:
+            local_conn.rollback() # Откат в случае, если колонки уже есть, чтобы транзакция не зависла
+            
+        # Привязка старых чатов
+        try:
+            local_cursor.execute("UPDATE chats_v2 SET owner_id = 354584527 WHERE owner_id IS NULL;")
+            local_conn.commit()
+            print("База данных успешно инициализирована и проверена.")
+        except Exception as e:
+            local_conn.rollback()
+            print(f"Ошибка при привязке старых чатов: {e}")
+
+# Вызываем функцию создания таблиц сразу при старте файла
+init_db()
+
+# --- 4. ФУНКЦИИ РАБОТЫ С БД ---
 def add_chat(chat_id, title="Без названия"):
-    cursor.execute('''
-        INSERT INTO chats_v2 (chat_id, ai_enabled, premium_until, chat_title) 
-        VALUES (%s, FALSE, 0, %s) 
-        ON CONFLICT (chat_id) 
-        DO UPDATE SET chat_title = EXCLUDED.chat_title WHERE EXCLUDED.chat_title IS NOT NULL
-    ''', (chat_id, title))
-
-import time
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('''
+            INSERT INTO chats_v2 (chat_id, ai_enabled, premium_until, chat_title) 
+            VALUES (%s, FALSE, 0, %s) 
+            ON CONFLICT (chat_id) 
+            DO UPDATE SET chat_title = EXCLUDED.chat_title WHERE EXCLUDED.chat_title IS NOT NULL
+        ''', (chat_id, title))
+        local_conn.commit()
 
 def check_chat_premium(chat_id):
     """Проверяет, действует ли премиум-подписка для чата"""
-    cursor.execute('SELECT premium_until, ai_enabled FROM chats_v2 WHERE chat_id = %s', (chat_id,))
-    res = cursor.fetchone()
-    if not res:
-        return False
-    
-    premium_until, ai_enabled = res
-    current_time = time.time()
-    
-    # Если время подписки истекло, а ИИ был включен — выключаем его автоматически
-    if premium_until < current_time and ai_enabled:
-        cursor.execute('UPDATE chats_v2 SET ai_enabled = FALSE WHERE chat_id = %s', (chat_id,))
-        conn.commit()
-        return False
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('SELECT premium_until, ai_enabled FROM chats_v2 WHERE chat_id = %s', (chat_id,))
+        res = local_cursor.fetchone()
         
-    return premium_until >= current_time
-
-
-
-
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS warns (
-    user_id BIGINT, 
-    chat_id BIGINT, 
-    count INTEGER,
-    UNIQUE(user_id, chat_id)
-)''')
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS stats (
-    chat_id BIGINT PRIMARY KEY, 
-    deleted_count INTEGER DEFAULT 0, 
-    mute_count INTEGER DEFAULT 0,
-    ai_requests INTEGER DEFAULT 0
-)''')
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS moderation_logs (
-    id SERIAL PRIMARY KEY,
-    chat_id BIGINT,
-    user_id BIGINT,
-    user_name TEXT,
-    reason TEXT,
-    action_type TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)''')
-conn.commit()
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS chat_admins (
-    id SERIAL PRIMARY KEY,
-    chat_id BIGINT,
-    admin_id BIGINT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(chat_id, admin_id)
-)''')
-conn.commit()
-
-cursor.execute('''CREATE TABLE IF NOT EXISTS processed_txs (
-    tx_hash TEXT PRIMARY KEY,
-    chat_id BIGINT
-)''')
-conn.commit()
-
-
-# На всякий случай проверяем, есть ли колонка ai_requests (если таблица была создана до обновления)
-try:
-    cursor.execute('ALTER TABLE stats ADD COLUMN IF NOT EXISTS ai_requests INTEGER DEFAULT 0')
-except Exception:
-    pass
+        if not res:
+            return False
+        
+        premium_until, ai_enabled = res
+        current_time = time.time()
+        
+        # Если время подписки истекло, а ИИ был включен — выключаем его автоматически
+        if premium_until < current_time and ai_enabled:
+            local_cursor.execute('UPDATE chats_v2 SET ai_enabled = FALSE WHERE chat_id = %s', (chat_id,))
+            local_conn.commit()
+            return False
+            
+        return premium_until >= current_time
 
 def set_ai(chat_id, status, days=30):
     until = (datetime.now() + timedelta(days=days)).timestamp() if status else 0
-    cursor.execute('UPDATE chats_v2 SET ai_enabled = %s, premium_until = %s WHERE chat_id = %s', (status, until, chat_id))
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('UPDATE chats_v2 SET ai_enabled = %s, premium_until = %s WHERE chat_id = %s', (status, until, chat_id))
+        local_conn.commit()
 
 def is_ai(chat_id):
     DAILY_AI_LIMIT = 1000
-
-    # Берем свободный курсор из пула
     with get_db() as (local_conn, local_cursor):
         local_cursor.execute('''
             SELECT c.ai_enabled, u.premium_until, c.ai_requests_today, c.last_request_date
@@ -251,35 +220,43 @@ def is_ai(chat_id):
 
         return False
 
-
-
 def add_warn(user_id, chat_id):
-    cursor.execute('SELECT count FROM warns WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
-    res = cursor.fetchone()
-    if res:
-        count = res[0] + 1
-        cursor.execute('UPDATE warns SET count = %s WHERE user_id = %s AND chat_id = %s', (count, user_id, chat_id))
-    else:
-        count = 1
-        cursor.execute('INSERT INTO warns (user_id, chat_id, count) VALUES (%s, %s, %s)', (user_id, chat_id, count))
-    return count
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('SELECT count FROM warns WHERE user_id = %s AND chat_id
+
+
+= %s', (user_id, chat_id))
+        res = local_cursor.fetchone()
+        if res:
+            count = res[0] + 1
+            local_cursor.execute('UPDATE warns SET count = %s WHERE user_id = %s AND chat_id = %s', (count, user_id, chat_id))
+        else:
+            count = 1
+            local_cursor.execute('INSERT INTO warns (user_id, chat_id, count) VALUES (%s, %s, %s)', (user_id, chat_id, count))
+        local_conn.commit()
+        return count
 
 def reset_warns(user_id, chat_id):
-    cursor.execute('DELETE FROM warns WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('DELETE FROM warns WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
+        local_conn.commit()
 
 def record_stat(chat_id, stat_type):
-    cursor.execute('INSERT INTO stats (chat_id, deleted_count, mute_count, ai_requests) VALUES (%s, 0, 0, 0) ON CONFLICT (chat_id) DO NOTHING', (chat_id,))
-    if stat_type == 'delete':
-        cursor.execute('UPDATE stats SET deleted_count = deleted_count + 1 WHERE chat_id = %s', (chat_id,))
-    elif stat_type == 'mute':
-        cursor.execute('UPDATE stats SET mute_count = mute_count + 1 WHERE chat_id = %s', (chat_id,))
-    elif stat_type == 'ai':
-        cursor.execute('UPDATE stats SET ai_requests = ai_requests + 1 WHERE chat_id = %s', (chat_id,))
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('INSERT INTO stats (chat_id, deleted_count, mute_count, ai_requests) VALUES (%s, 0, 0, 0) ON CONFLICT (chat_id) DO NOTHING', (chat_id,))
+        if stat_type == 'delete':
+            local_cursor.execute('UPDATE stats SET deleted_count = deleted_count + 1 WHERE chat_id = %s', (chat_id,))
+        elif stat_type == 'mute':
+            local_cursor.execute('UPDATE stats SET mute_count = mute_count + 1 WHERE chat_id = %s', (chat_id,))
+        elif stat_type == 'ai':
+            local_cursor.execute('UPDATE stats SET ai_requests = ai_requests + 1 WHERE chat_id = %s', (chat_id,))
+        local_conn.commit()
 
 def get_stats(chat_id):
-    cursor.execute('SELECT deleted_count, mute_count, ai_requests FROM stats WHERE chat_id = %s', (chat_id,))
-    res = cursor.fetchone()
-    return res if res else (0, 0, 0)
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('SELECT deleted_count, mute_count, ai_requests FROM stats WHERE chat_id = %s', (chat_id,))
+        res = local_cursor.fetchone()
+        return res if res else (0, 0, 0)
 
 
 # --- 3. БАЗОВЫЙ ФИЛЬТР (МАТ И СЛОВАРЬ) ---
@@ -332,26 +309,6 @@ def basic_filter(text: str) -> bool:
 
 
 # --- 4. ФУНКЦИЯ ИИ-МОДЕРАЦИИ (Gemini REST API) ---
-@dp.message(F.chat.type.in_({"group", "supergroup", "channel"}), F.text)
-async def handle_group_messages(m: Message):
-    user_id = m.from_user.id
-    current_time = time.time()
-    
-    # === 1. RATE LIMITING (АНТИ-ФЛУД) ===
-    if user_id in flood_cache:
-        last_time, msg_count = flood_cache[user_id]
-        if current_time - last_time < 2:  # Если прошло меньше 2 секунд с первого сообщения
-            if msg_count >= 3:            # И он отправил уже больше 3 сообщений
-                await m.delete()          # Молча удаляем флуд
-                return                    # ПРЕРЫВАЕМ обработку, Gemini НЕ дергаем!
-            else:
-                flood_cache[user_id] = (last_time, msg_count + 1)
-        else:
-            flood_cache[user_id] = (current_time, 1) # Сбрасываем счетчик, если время вышло
-    else:
-        flood_cache[user_id] = (current_time, 1)
-
-
 
 async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) -> str:
     """
@@ -363,8 +320,11 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
         print(f"🧠 AI moderation request | chat_id: {chat_id} | message_id: {message_id}", flush=True)
         
         # ТЕХНИЧЕСКИЙ ЩИТ: скрываем личные данные ДО отправки в нейросеть
-        # Маскируем номера телефонов 
-        safe_text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z|{2,}\b', '[EMAIL]', safe_text)
+        # Сначала заменяем телефоны в оригинальном тексте (создаем safe_text)
+        safe_text = re.sub(r'\+?[\d\-\(\)\s]{10,15}', '[ТЕЛЕФОН]', text)
+        
+        # Затем заменяем email-адреса уже в безопасном тексте
+        safe_text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-zA-Z]{2,}\b', '[EMAIL]', safe_text)
         
         prompt = f"""
         Проверь это сообщение от пользователя "{author_name}". 
@@ -398,9 +358,105 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
         print(f"⚠️ Ошибка Gemini | chat_id: {chat_id} | message_id: {message_id} | Error: {e}", flush=True)
         return "error"
 
+@dp.message(F.chat.type.in_({"group", "supergroup"}), F.text)
+async def handle_group_messages(m: Message):
+    user_id = m.from_user.id
+    chat_id = m.chat.id
+    current_time = time.time()
+    
+    # === 1. RATE LIMITING (АНТИ-ФЛУД) ===
+    if user_id in flood_cache:
+        last_time, msg_count = flood_cache[user_id]
+        if current_time - last_time < 2:  # Если прошло меньше 2 секунд
+            if msg_count >= 3:            # И отправлено больше 3 сообщений
+                try:
+                    await m.delete()      # Молча удаляем флуд
+                except:
+                    pass
+                return                    # ПРЕРЫВАЕМ обработку
+            else:
+                flood_cache[user_id] = (last_time, msg_count + 1)
+        else:
+            flood_cache[user_id] = (current_time, 1)
+    else:
+        flood_cache[user_id] = (current_time, 1)
+
+    # === 2. ПРОВЕРКА СООБЩЕНИЯ (МОДЕРАЦИЯ) ===
+    reason = None
+    
+    # Сначала проверяем, включен ли ИИ и есть ли лимиты
+    if is_ai(chat_id):
+        # Отправляем в Gemini
+        ai_result = await ai_filter(m.text, m.from_user.full_name, chat_id, m.message_id)
+        
+        if ai_result in ["spam", "toxic", "obscene"]:
+            reason = ai_result
+        elif ai_result == "error":
+            # Если Gemini упал (например, лимиты Google), используем базовый фильтр как запасной
+            if basic_filter(m.text):
+                reason = "obscene (словарный фильтр)"
+    else:
+        # Если ИИ выключен, проверяем только по нашему словарю
+        if basic_filter(m.text):
+            reason = "obscene (словарный фильтр)"
+
+    # === 3. НАКАЗАНИЕ И ЗАПИСЬ ЛОГОВ ===
+    if reason:
+        # Удаляем плохое сообщение
+        try:
+            await m.delete()
+        except:
+            pass # Бот может не иметь прав на удаление
+            
+        # Добавляем предупреждение пользователю (функция add_warn уже использует get_db)
+        warns = add_warn(user_id, chat_id)
+        action_taken = "deleted"
+        
+        # Если это третье нарушение — выдаем мут на 1 час
+        if warns >= 3:
+            try:
+                until_date = int(time.time()) + 3600
+                await bot.restrict_chat_member(
+                    chat_id, 
+                    user_id, 
+                    permissions=ChatPermissions(can_send_messages=False), 
+                    until_date=until_date
+                )
+                action_taken = "muted"
+                reset_warns(user_id, chat_id) # Сбрасываем варны после мута
+            except Exception as e:
+                print(f"Не удалось выдать мут: {e}")
+
+        # ЗАПИСЬ В ЛОГИ БД (Используем наш новый пул соединений!)
+        try:
+            with get_db() as (local_conn, local_cursor):
+                local_cursor.execute("""
+                    INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (chat_id, user_id, m.from_user.full_name, reason, action_taken))
+                local_conn.commit()
+        except Exception as e:
+            print(f"Ошибка записи лога: {e}")
+            
+        # Обновляем статистику (функция record_stat тоже использует get_db)
+        record_stat(chat_id, "delete" if action_taken == "deleted" else "mute")
+
+        # Отправляем сервисное сообщение в чат
+        if action_taken == "muted":
+            msg = await m.answer(f"🚫 Пользователь <b>{m.from_user.full_name}</b> получил мут на 1 час.\nПричина: {reason}.", parse_mode="HTML")
+        else:
+            msg = await m.answer(f"⚠️ Сообщение от <b>{m.from_user.full_name}</b> удалено.\nПричина: {reason}. Предупреждение {warns}/3.", parse_mode="HTML")
+            
+        # Удаляем сервисное сообщение через 5 секунд, чтобы не засорять чат
+        await asyncio.sleep(5)
+        try:
+            await msg.delete()
+        except:
+            pass
 
 
 # --- 5. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ И АДМИНОВ ---
+
 @dp.message(Command("start"))
 async def cmd_start(m: Message):
     # Проверяем, что команда вызвана в личных сообщениях с ботом
@@ -409,9 +465,10 @@ async def cmd_start(m: Message):
 
     admin_id = m.from_user.id
     
-    # Ищем привязанные чаты владельца
-    cursor.execute('SELECT chat_id FROM chat_admins WHERE admin_id = %s', (admin_id,))
-    chats = cursor.fetchall()
+    # Ищем привязанные чаты владельца через безопасный пул соединений
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('SELECT chat_id FROM chat_admins WHERE admin_id = %s', (admin_id,))
+        chats = local_cursor.fetchall()
 
     # Оставляем ТОЛЬКО кнопку Личного кабинета
     inline_keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -445,8 +502,6 @@ async def cmd_start(m: Message):
         
     await m.answer(text, reply_markup=inline_keyboard, parse_mode="HTML")
 
-
-
 # Ловим события добавления бота в группу или выдачи ему прав
 @dp.my_chat_member()
 async def bot_added_to_chat(event: ChatMemberUpdated):
@@ -454,34 +509,35 @@ async def bot_added_to_chat(event: ChatMemberUpdated):
         chat_id = str(event.chat.id)
         admin_id = event.from_user.id
         chat_title = event.chat.title or "Без названия"
+        
         try:
-            # 1. Сохраняем или обновляем чат в chats_v2 СРАЗУ с owner_id
-            cursor.execute(
-                """INSERT INTO chats_v2 (chat_id, chat_title, owner_id, ai_enabled) 
-                   VALUES (%s, %s, %s, FALSE)
-                   ON CONFLICT (chat_id) 
-                   DO UPDATE SET owner_id = EXCLUDED.owner_id, chat_title = EXCLUDED.chat_title""",
-                (chat_id, chat_title, admin_id)
-            )
-            
-            # 2. Оставляем вашу таблицу chat_admins (если она нужна для других фич)
-            cursor.execute(
-                '''INSERT INTO chat_admins (chat_id, admin_id) 
-                   VALUES (%s, %s) 
-                   ON CONFLICT (chat_id, admin_id) DO NOTHING''',
-                (chat_id, admin_id)
-            )
-            
-            conn.commit()
+            # Безопасная запись с пулом соединений
+            with get_db() as (local_conn, local_cursor):
+                # 1. Сохраняем или обновляем чат в chats_v2 СРАЗУ с owner_id
+                local_cursor.execute(
+                    """INSERT INTO chats_v2 (chat_id, chat_title, owner_id, ai_enabled) 
+                       VALUES (%s, %s, %s, FALSE)
+                       ON CONFLICT (chat_id) 
+                       DO UPDATE SET owner_id = EXCLUDED.owner_id, chat_title = EXCLUDED.chat_title""",
+                    (chat_id, chat_title, admin_id)
+                )
+                
+                # 2. Оставляем вашу таблицу chat_admins (если она нужна для других фич)
+                local_cursor.execute(
+                    '''INSERT INTO chat_admins (chat_id, admin_id) 
+                       VALUES (%s, %s) 
+                       ON CONFLICT (chat_id, admin_id) DO NOTHING''',
+                    (chat_id, admin_id)
+                )
+                local_conn.commit()
+                
             print(f"✅ Авто-привязка: Чат '{chat_title}' ({chat_id}) закреплен за владельцем {admin_id}")
         except Exception as e:
-            conn.rollback()
+            # Если произойдет ошибка, менеджер контекста get_db() сам безопасно закроет и откатит транзакцию
             print(f"❌ Ошибка авто-привязки: {e}")
         
 
-
-
-# --- ОБРАБОТЧИКИ НАЖАТИЙ НА КНОПКИ МЕНЮ ---
+# --- 6. ОБРАБОТЧИКИ НАЖАТИЙ НА КНОПКИ МЕНЮ И КОМАНДЫ ---
 
 @dp.message(Command("privacy"))
 async def cmd_privacy(m: Message):
@@ -498,22 +554,24 @@ async def cmd_privacy(m: Message):
 async def send_report(m: Message):
     chat_id = m.chat.id
     
-    cursor.execute('''
-        SELECT reason, COUNT(*) 
-        FROM moderation_logs 
-        WHERE chat_id = %s
-        GROUP BY reason
-    ''', (chat_id,))
-    stats = cursor.fetchall()
-    
-    cursor.execute('''
-        SELECT user_name, action_type, reason 
-        FROM moderation_logs 
-        WHERE chat_id = %s 
-        ORDER BY created_at DESC 
-        LIMIT 5
-    ''', (chat_id,))
-    recent_logs = cursor.fetchall()
+    # Безопасное чтение статистики через пул соединений
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('''
+            SELECT reason, COUNT(*) 
+            FROM moderation_logs 
+            WHERE chat_id = %s
+            GROUP BY reason
+        ''', (chat_id,))
+        stats = local_cursor.fetchall()
+        
+        local_cursor.execute('''
+            SELECT user_name, action_type, reason 
+            FROM moderation_logs 
+            WHERE chat_id = %s 
+            ORDER BY created_at DESC 
+            LIMIT 5
+        ''', (chat_id,))
+        recent_logs = local_cursor.fetchall()
     
     if not stats:
         await m.answer("📭 В этом чате пока нет записей о нарушениях.")
@@ -540,14 +598,15 @@ async def send_report(m: Message):
 
 @dp.message(Command("status"), F.chat.type.in_({"group", "supergroup"}))
 async def chat_status(m: Message):
-    # Обновляем команду /status, чтобы она тоже смотрела на подписку владельца
-    cursor.execute('''
-        SELECT c.ai_enabled, u.premium_until 
-        FROM chats_v2 c
-        LEFT JOIN user_subscriptions u ON c.owner_id = u.owner_id
-        WHERE c.chat_id = %s
-    ''', (m.chat.id,))
-    res = cursor.fetchone()
+    # Безопасное чтение статуса подписки
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('''
+            SELECT c.ai_enabled, u.premium_until 
+            FROM chats_v2 c
+            LEFT JOIN user_subscriptions u ON c.owner_id = u.owner_id
+            WHERE c.chat_id = %s
+        ''', (m.chat.id,))
+        res = local_cursor.fetchone()
     
     if res and res[0] and res[1] and res[1] > datetime.now().timestamp():
         end_date = datetime.fromtimestamp(res[1]).strftime('%d.%m.%Y %H:%M')
@@ -565,7 +624,6 @@ async def chat_status(m: Message):
             parse_mode="HTML"
         )
 
-
 @dp.message(Command("unwarn"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_unwarn(m: Message):
     admins = await m.chat.get_administrators()
@@ -579,7 +637,7 @@ async def cmd_unwarn(m: Message):
 
     target_user = m.reply_to_message.from_user
     try:
-        reset_warns(target_user.id, m.chat.id)
+        reset_warns(target_user.id, m.chat.id) # Функция reset_warns уже безопасна
         await m.answer(f"✅ Предупреждения пользователя <b>{target_user.first_name}</b> обнулены.", parse_mode="HTML")
     except Exception as e:
         print(f"Ошибка при снятии варна: {e}")
@@ -587,7 +645,10 @@ async def cmd_unwarn(m: Message):
 @dp.message(Command("unmute"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_unmute(m: Message):
     admins = await m.chat.get_administrators()
-    if m.from_user.id not in [admin.user.id for admin in admins]:
+    if m.from_user.id not
+
+
+[admin.user.id for admin in admins]:
         await m.answer("❌ Эта команда доступна только администраторам.")
         return
 
@@ -605,7 +666,7 @@ async def cmd_unmute(m: Message):
             can_add_web_page_previews=True
         )
         await bot.restrict_chat_member(chat_id=m.chat.id, user_id=target_user.id, permissions=permissions)
-        reset_warns(target_user.id, m.chat.id)
+        reset_warns(target_user.id, m.chat.id) # Функция reset_warns уже безопасна
         await m.answer(f"🔊 Мут снят! <b>{target_user.first_name}</b> снова может писать сообщения.", parse_mode="HTML")
     except Exception as e:
         await m.answer("❌ Не удалось снять мут. Возможно, этот пользователь не в муте, или у бота не хватает прав.")
@@ -618,7 +679,7 @@ async def show_stats(m: Message):
         await m.answer("❌ Эта команда доступна только администраторам чата.")
         return
 
-    d_count, m_count, ai_reqs = get_stats(m.chat.id)
+    d_count, m_count, ai_reqs = get_stats(m.chat.id) # Функция get_stats уже безопасна
     await m.answer(
         f"📊 <b>Статистика модерации:</b>\n\n"
         f"🗑 Удалено сообщений: <b>{d_count}</b>\n"
@@ -628,20 +689,29 @@ async def show_stats(m: Message):
 
 
 # --- 6. ПАНЕЛЬ ВЛАДЕЛЬЦА И ОПЛАТА PREMIUM ---
-OWNER_ID = 354584527
+from aiogram.filters import Command
+import time
+import os
+from datetime import datetime
+
+# Ваш Telegram ID (оставил как у вас, чуть причесал)
+OWNER_ID = int(os.environ.get("ADMIN_ID", 354584527))
+MY_ADMIN_ID = OWNER_ID 
 
 @dp.message(Command("botstats"))
 async def cmd_botstats(m: Message):
     if m.from_user.id != OWNER_ID: return
         
     try:
-        cursor.execute('SELECT COUNT(*) FROM chats_v2')
-        total_chats = cursor.fetchone()[0]
-        
-        current_time = datetime.now().timestamp()
-        cursor.execute('SELECT COUNT(*) FROM chats_v2 WHERE ai_enabled = TRUE AND premium_until > %s', (current_time,))
-        premium_chats = cursor.fetchone()[0]
-        
+        # Быстро открыли БД, прочитали цифры, закрыли
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute('SELECT COUNT(*) FROM chats_v2')
+            total_chats = local_cursor.fetchone()[0]
+            
+            current_time = datetime.now().timestamp()
+            local_cursor.execute('SELECT COUNT(*) FROM chats_v2 WHERE ai_enabled = TRUE AND premium_until > %s', (current_time,))
+            premium_chats = local_cursor.fetchone()[0]
+            
         basic_chats = total_chats - premium_chats
         
         await m.answer(
@@ -658,13 +728,15 @@ async def cmd_botstats(m: Message):
 async def cmd_chatlist(m: Message, bot: Bot):
     if m.from_user.id != OWNER_ID: return
 
-    cursor.execute('''
-        SELECT c.chat_id, c.ai_enabled, c.premium_until, COALESCE(s.ai_requests, 0)
-        FROM chats_v2 c
-        LEFT JOIN stats s ON c.chat_id = s.chat_id
-        ORDER BY COALESCE(s.ai_requests, 0) DESC
-    ''')
-    all_chats = cursor.fetchall()
+    # 1. Быстро получаем данные из БД и сразу освобождаем соединение
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('''
+            SELECT c.chat_id, c.ai_enabled, c.premium_until, COALESCE(s.ai_requests, 0)
+            FROM chats_v2 c
+            LEFT JOIN stats s ON c.chat_id = s.chat_id
+            ORDER BY COALESCE(s.ai_requests, 0) DESC
+        ''')
+        all_chats = local_cursor.fetchall()
     
     if not all_chats:
         await m.answer("Список чатов пока пуст.")
@@ -675,7 +747,9 @@ async def cmd_chatlist(m: Message, bot: Bot):
     current_time = datetime.now().timestamp()
     
     active_count = 0
+    dead_chats = [] # Сюда соберем ID чатов, откуда бота кикнули
     
+    # 2. Спокойно общаемся с API Telegram (БД в это время свободна!)
     for chat_id, ai_enabled, premium_until, ai_reqs in all_chats:
         if active_count >= 20:
             break
@@ -693,9 +767,17 @@ async def cmd_chatlist(m: Message, bot: Bot):
             active_count += 1
             
         except Exception:
-            cursor.execute('DELETE FROM chats_v2 WHERE chat_id = %s', (chat_id,))
-            cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
+            # Если бот удален, запоминаем ID
+            dead_chats.append(chat_id)
             continue
+            
+    # 3. Если есть "мертвые" чаты, быстро открываем БД и удаляем их пачкой
+    if dead_chats:
+        with get_db() as (local_conn, local_cursor):
+            for dc_id in dead_chats:
+                local_cursor.execute('DELETE FROM chats_v2 WHERE chat_id = %s', (dc_id,))
+                local_cursor.execute('DELETE FROM stats WHERE chat_id = %s', (dc_id,))
+            local_conn.commit()
             
     if active_count == 0:
         text = "К сожалению, бот был удален из всех известных чатов."
@@ -704,17 +786,11 @@ async def cmd_chatlist(m: Message, bot: Bot):
         await m.answer(text, parse_mode="HTML")
     except Exception as e:
         await m.answer(f"❌ Ошибка отправки списка: {e}")
-
-from aiogram.filters import Command
-import time
-
-# Ваш Telegram ID
-MY_ADMIN_ID = int(os.environ.get("ADMIN_ID", 354584527))
-OWNER_ID = int(os.environ.get("ADMIN_ID", 354584527))
  
 
+
 @dp.message(Command("givepro"))
-async def cmd_give_pro(message: types.Message):
+async def cmd_give_pro(message: Message):
     # Бот реагирует только на сообщения от владельца
     if message.from_user.id != MY_ADMIN_ID:
         return
@@ -732,19 +808,21 @@ async def cmd_give_pro(message: types.Message):
     premium_until = current_time + (days * 24 * 60 * 60)
     
     try:
-        cursor.execute(
-            """INSERT INTO user_subscriptions (owner_id, premium_until, slots) 
-               VALUES (%s, %s, %s)
-               ON CONFLICT (owner_id) 
-               DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots""",
-            (target_id, premium_until, slots)
-        )
-        conn.commit()
+        # Безопасная запись с пулом соединений
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute(
+                """INSERT INTO user_subscriptions (owner_id, premium_until, slots) 
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (owner_id) 
+                   DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots""",
+                (target_id, premium_until, slots)
+            )
+            local_conn.commit()
+            
         await message.answer(f"✅ Готово! Пользователю `{target_id}` выдана PRO-подписка на {days} дней. Слотов: {slots}.", parse_mode="Markdown")
     except Exception as e:
-        conn.rollback()
+        # psycopg2 сам откатит транзакцию при ошибке
         await message.answer(f"❌ Ошибка: {e}")
-
 
 @dp.message(Command("give_premium"))
 async def cmd_give_premium(m: Message):
@@ -760,8 +838,11 @@ async def cmd_give_premium(m: Message):
         target_chat_id = int(args[1])
         future_time = (datetime.now() + timedelta(days=30)).timestamp()
         
-        cursor.execute('UPDATE chats_v2 SET ai_enabled = TRUE, premium_until = %s WHERE chat_id = %s', (future_time, target_chat_id))
-        
+        # Безопасная запись с пулом соединений (и добавленным commit!)
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute('UPDATE chats_v2 SET ai_enabled = TRUE, premium_until = %s WHERE chat_id = %s', (future_time, target_chat_id))
+            local_conn.commit() 
+            
         await m.answer(f"✅ <b>Успешно!</b>\nPremium на 30 дней выдан чату: <code>{target_chat_id}</code>", parse_mode="HTML")
         
     except ValueError:
@@ -782,14 +863,15 @@ async def send_invoice(m: Message):
         prices=prices
     )
 
-from aiogram.types import PreCheckoutQuery
+from aiogram.types import PreCheckoutQuery, Message
+from aiogram import F
 import psycopg2
 import time
 
 # 1. СТРОГИЙ ОБРАБОТЧИК PRE-CHECKOUT
 @dp.pre_checkout_query()
 async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
-    # Проверяем, наш ли это payload
+    # Проверяем, наш ли это payload (Тут база данных не нужна, оставляем как есть)
     if not pre_checkout_query.invoice_payload.startswith("sub_stars_"):
         await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message="Неизвестный товар. Пожалуйста, перезапустите приложение.")
         return
@@ -807,7 +889,6 @@ async def process_pre_checkout_query(pre_checkout_query: PreCheckoutQuery):
     # Если всё идеально, разрешаем оплату
     await bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
 
-
 # 2. ЕДИНСТВЕННЫЙ ОБРАБОТЧИК УСПЕШНОГО ПЛАТЕЖА
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: Message):
@@ -816,55 +897,61 @@ async def process_successful_payment(message: Message):
     user_id = message.from_user.id
     payload = payment_info.invoice_payload
     
-    # 1. Защита от дублей: Пытаемся записать транзакцию в БД
-    try:
-        cursor.execute("""
-            INSERT INTO payments (telegram_payment_charge_id, user_id, payload, amount, currency)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (charge_id, user_id, payload, payment_info.total_amount, payment_info.currency))
-        conn.commit()
-    except psycopg2.IntegrityError:
-        conn.rollback()
-        # Платёж с таким ID уже был обработан! Игнорируем дубль.
-        print(f"Дубль платежа перехвачен: {charge_id}")
-        return
-    except Exception as e:
-        conn.rollback()
-        print(f"Ошибка БД при записи платежа: {e}")
-        return
+    # Открываем единое соединение для всей цепочки обработки платежа
+    with get_db() as (local_conn, local_cursor):
+        
+        # 1. Защита от дублей: Пытаемся записать транзакцию в БД
+        try:
+            local_cursor.execute("""
+                INSERT INTO payments (telegram_payment_charge_id, user_id, payload, amount, currency)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (charge_id, user_id, payload, payment_info.total_amount, payment_info.currency))
+            local_conn.commit()
+        except psycopg2.IntegrityError:
+            local_conn.rollback() # Очищаем транзакцию перед возвратом в пул
+            # Платёж с таким ID уже был обработан! Игнорируем дубль.
+            print(f"Дубль платежа перехвачен: {charge_id}")
+            return
+        except Exception as e:
+            local_conn.rollback() # Очищаем транзакцию перед возвратом в пул
+            print(f"Ошибка БД при записи платежа: {e}")
+            return
 
-    # 2. Если запись прошла успешно, выдаем товар
-    if payload.startswith("sub_stars_"):
-        owner_id = int(payload.split("_")[2]) # Извлекаем ID из sub_stars_123456
-        current_time = time.time()
-        
-        # Проверяем текущую подписку
-        cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
-        sub_row = cursor.fetchone()
-        
-        if sub_row and sub_row[0] > current_time:
-            # Продлеваем текущую
-            new_until = sub_row[0] + (30 * 24 * 3600)
-            new_slots = sub_row[1] + 3
-            cursor.execute("UPDATE user_subscriptions SET premium_until = %s, slots = %s WHERE owner_id = %s", 
-                           (new_until, new_slots, owner_id))
-        else:
-            # Создаем новую
-            new_until = current_time + (30 * 24 * 3600)
-            new_slots = 3
-            cursor.execute("""
-                INSERT INTO user_subscriptions (owner_id, premium_until, slots)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (owner_id) 
-                DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots
-            """, (owner_id, new_until, new_slots))
+        # 2. Если запись прошла успешно, выдаем товар
+        if payload.startswith("sub_stars_"):
+            owner_id = int(payload.split("_")[2]) # Извлекаем ID из sub_stars_123456
+            current_time = time.time()
             
-        conn.commit()
-        await message.answer("🎉 Оплата успешно получена! Вам добавлено 3 слота на 30 дней. Можете включать ИИ в Личном кабинете!")
+            # Проверяем текущую подписку
+            local_cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+            sub_row = local_cursor.fetchone()
+            
+            if sub_row and sub_row[0] > current_time:
+                # Продлеваем текущую
+                new_until = sub_row[0] + (30 * 24 * 3600)
+                new_slots = sub_row[1] + 3
+                local_cursor.execute("UPDATE user_subscriptions SET premium_until = %s, slots = %s WHERE owner_id = %s", 
+                               (new_until, new_slots, owner_id))
+            else:
+                # Создаем новую
+                new_until = current_time + (30 * 24 * 3600)
+                new_slots = 3
+                local_cursor.execute("""
+                    INSERT INTO user_subscriptions (owner_id, premium_until, slots)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (owner_id) 
+                    DO UPDATE SET premium_until = EXCLUDED.premium_until, slots = EXCLUDED.slots
+                """, (owner_id, new_until, new_slots))
+                
+            local_conn.commit()
+            
+    # Сообщение юзеру отправляем уже вне блока with, чтобы как можно быстрее освободить базу данных
+    await message.answer("🎉 Оплата успешно получена! Вам добавлено 3 слота на 30 дней. Можете включать ИИ в Личном кабинете!")
 
 
 
-# --- 7. ОСНОВНОЙ ПРОЦЕСС МОДЕРАЦИИ ---
+# --- 7. ОСНОВНОЙ ПРОЦЕСС МОДЕРАЦИИ И ФОНОВЫЕ ЗАДАЧИ ---
+
 async def punish(m: Message, reason: str):
     try:
         if m.sender_chat:
@@ -874,13 +961,15 @@ async def punish(m: Message, reason: str):
             user_id = m.from_user.id
             user_name = m.from_user.first_name
             
-        warns = add_warn(user_id, m.chat.id)
+        warns = add_warn(user_id, m.chat.id) # Эта функция уже безопасна
         
-        cursor.execute(
-            'INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type) VALUES (%s, %s, %s, %s, %s)',
-            (m.chat.id, user_id, user_name, reason, f"warn_{warns}")
-        )
-        conn.commit() 
+        # Безопасная запись лога наказания через пул соединений
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute(
+                'INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type) VALUES (%s, %s, %s, %s, %s)',
+                (m.chat.id, user_id, user_name, reason, f"warn_{warns}")
+            )
+            local_conn.commit() 
  
         if warns == 1:
             text = f"🚫 <b>{user_name}</b>, сообщение удалено ({reason}). \nЭто ваше первое предупреждение (1/3)."
@@ -888,19 +977,19 @@ async def punish(m: Message, reason: str):
             until = m.date + timedelta(minutes=5)
             if not m.sender_chat:
                 await bot.restrict_chat_member(chat_id=m.chat.id, user_id=user_id, permissions=ChatPermissions(can_send_messages=False), until_date=until)
-            record_stat(m.chat.id, 'mute')
+            record_stat(m.chat.id, 'mute') # Уже безопасно
             text = f"⚠️ <b>{user_name}</b>, второе предупреждение (2/3)! \nВы получаете мут на 5 минут."
         else:
             until = m.date + timedelta(hours=1)
             if not m.sender_chat:
                 await bot.restrict_chat_member(chat_id=m.chat.id, user_id=user_id, permissions=ChatPermissions(can_send_messages=False), until_date=until)
-            record_stat(m.chat.id, 'mute')
-            reset_warns(user_id, m.chat.id)
+            record_stat(m.chat.id, 'mute') # Уже безопасно
+            reset_warns(user_id, m.chat.id) # Уже безопасно
             text = f"🛑 <b>{user_name}</b>, лимит исчерпан (3/3). \nВы получаете мут на 1 час."
 
         w = await m.reply(text, parse_mode="HTML")
         await m.delete()
-        record_stat(m.chat.id, 'delete')
+        record_stat(m.chat.id, 'delete') # Уже безопасно
 
         await asyncio.sleep(10)
         await w.delete()
@@ -913,7 +1002,7 @@ async def punish(m: Message, reason: str):
 async def handle_messages(m: Message):
     if not m.text or m.is_automatic_forward: return
 
-    # Передаем ID и актуальное название чата
+    # Передаем ID и актуальное название чата (функция add_chat уже безопасна)
     add_chat(m.chat.id, m.chat.title or "Без названия")
     text = m.text
 
@@ -926,7 +1015,6 @@ async def handle_messages(m: Message):
         except Exception:
             pass
 
-            
     if is_ai(m.chat.id):
         has_link = False
         if m.entities:
@@ -946,18 +1034,11 @@ async def handle_messages(m: Message):
     if is_ai(m.chat.id):
         record_stat(m.chat.id, 'ai')
         author = m.sender_chat.title if m.sender_chat else m.from_user.first_name
-        is_bad = await ai_filter(author, text)
-        if is_bad:
-            await punish(m, "Токсичность/Спам-бот (AI)")
-
-import aiohttp
-
-
- 
-
- 
-
-import time
+        
+        # Передаем параметры ровно так, как ожидает наша функция ai_filter
+        is_bad_str = await ai_filter(text, author, m.chat.id, m.message_id)
+        if is_bad_str in ["spam", "toxic", "obscene"]:
+            await punish(m, f"Нарушение ({is_bad_str})")
 
 def check_expiring_subscriptions():
     """Фоновая задача: проверяет подписки, которые истекают через 24 часа, и шлет уведомления в ЛС."""
@@ -965,18 +1046,15 @@ def check_expiring_subscriptions():
         current_time = time.time()
         one_day_later = current_time + 86400 # 24 часа в секундах
         
-        # Ищем чаты, у которых PRO истекает в диапазоне от «сейчас» до «через 24 часа»,
-        # и которым мы еще не отправляли предупреждение (или проверяем по логике)
-        cursor.execute(
-            """SELECT chat_id, chat_title, owner_id, premium_until 
-               FROM chats_v2 
-               WHERE premium_until > %s AND premium_until <= %s""",
-            (current_time, one_day_later)
-        )
-        expiring_chats = cursor.fetchall()
-        
-        # Импортируем asyncio, чтобы запустить асинхронную отправку сообщения через бота из синхронной задачи
-        import asyncio
+        # Безопасное чтение истекающих подписок через пул соединений
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute(
+                """SELECT chat id, chat_title, owner_id, premium_until 
+                   FROM chats_v2 
+                   WHERE premium_until > %s AND premium_until <= %s""",
+                (current_time, one_day_later)
+            )
+            expiring_chats = local_cursor.fetchall()
         
         for chat in expiring_chats:
             chat_id, chat_title, owner_id, premium_until = chat
@@ -1002,27 +1080,24 @@ def check_expiring_subscriptions():
     except Exception as e:
         print(f"Ошибка в фоновой задаче проверки подписок: {e}")
 
-import asyncio
-
 async def cleanup_old_logs():
     """
     Фоновая задача: раз в сутки удаляет логи модерации старше 30 дней.
     """
     while True:
         try:
-            with conn.cursor() as cur:
-                # Удаляем записи старше 30 дней
-                cur.execute("DELETE FROM moderation_logs WHERE created_at < NOW() - INTERVAL '30 days'")
-                deleted_count = cur.rowcount
-                conn.commit()
+            # Безопасное удаление старых логов через пул соединений
+            with get_db() as (local_conn, local_cursor):
+                local_cursor.execute("DELETE FROM moderation_logs WHERE created_at < NOW() - INTERVAL '30 days'")
+                deleted_count = local_cursor.rowcount
+                local_conn.commit()
                 if deleted_count > 0:
                     print(f"🧹 Очистка БД: удалено {deleted_count} старых логов модерации.", flush=True)
         except Exception as e:
-            conn.rollback()
             print(f"⚠️ Ошибка при очистке старых логов: {e}", flush=True)
         
         # Ждем 24 часа (86400 секунд) перед следующим запуском
-        await asyncio.sleep(86400)
+        await asyncio.sleep(86400)_
 
 
 
@@ -1037,6 +1112,8 @@ from urllib.parse import parse_qsl, unquote
 from functools import wraps
 import time
 from datetime import datetime
+from waitress import serve
+import threading
 
 app = Flask(__name__)
 
@@ -1073,7 +1150,7 @@ def validate_telegram_data(init_data: str, bot_token: str):
 
 # 🔒 Декоратор, который не пустит запрос без правильной подписи
 def telegram_auth_required(f):
-    @wraps(f)
+    f
     def decorated_function(*args, **kwargs):
         if request.method == 'OPTIONS':
             return add_cors(jsonify({'status': 'ok'}))
@@ -1093,10 +1170,6 @@ def telegram_auth_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-from functools import wraps
-from flask import request, jsonify
-import time
-
 # Словарь для хранения истории API запросов: {ip_address: [timestamp1, timestamp2, ...]}
 api_request_history = {}
 
@@ -1105,7 +1178,7 @@ def api_rate_limit(limit=60, per=60):
     Блокирует IP-адрес, если он делает больше 'limit' запросов за 'per' секунд.
     """
     def decorator(f):
-        @wraps(f)
+        f
         def wrapped(*args, **kwargs):
             # Для служебных OPTIONS (CORS) запросов лимит не нужен
             if request.method == 'OPTIONS':
@@ -1123,22 +1196,21 @@ def api_rate_limit(limit=60, per=60):
             if ip not in api_request_history:
                 api_request_history[ip] = []
 
-            # Очищаем старые запросы, которые вышли за рамки нашего временного окна (например, старше 60 сек)
+            # Очищаем старые запросы, которые вышли за рамки временного окна
             api_request_history[ip] = [t for t in api_request_history[ip] if current_time - t < per]
 
             # Если запросов слишком много — бьем по рукам
             if len(api_request_history[ip]) >= limit:
                 print(f"🛑 БЛОКИРОВКА API (DDoS): IP {ip} превысил лимит запросов", flush=True)
                 response = jsonify({"status": "error", "error": "Слишком много запросов. Подождите минуту."})
-                # Если у вас есть функция add_cors(response), оберните в нее: return add_cors(response), 429
-                return response, 429
+                return add_cors(response), 429
 
             # Фиксируем новый легальный запрос
             api_request_history[ip].append(current_time)
 
             return f(*args, **kwargs)
-    return wrapped
-return decorator
+        return wrapped
+    return decorator
 
 @app.route('/')
 def home():
@@ -1152,10 +1224,10 @@ def api_get_chats():
     owner_id = request.verified_user_id
     
     try:
-        # Создаем локальный курсор для защиты от параллельных запросов
-        with conn.cursor() as cur:
-            cur.execute("SELECT chat_id, chat_title, ai_enabled FROM chats_v2 WHERE owner_id = %s", (owner_id,))
-            rows = cur.fetchall()
+        # Безопасное чтение через пул соединений get_db()
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute("SELECT chat_id, chat_title, ai_enabled FROM chats_v2 WHERE owner_id = %s", (owner_id,))
+            rows = local_cursor.fetchall()
             
         chats_list = [{"chat_id": str(r[0]), "chat_title": r[1] or "Без названия", "ai_enabled": bool(r[2])} for r in rows]
         return add_cors(jsonify({"status": "success", "chats": chats_list}))
@@ -1172,9 +1244,9 @@ def api_get_user_sub():
     
     try:
         current_time = time.time()
-        with conn.cursor() as cur:
-            cur.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
-            sub_row = cur.fetchone()
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+            sub_row = local_cursor.fetchone()
             
             is_active = False
             max_slots = 3
@@ -1186,8 +1258,8 @@ def api_get_user_sub():
                     is_active = True
                     expires_at = datetime.fromtimestamp(premium_until).strftime('%Y-%m-%d %H:%M')
 
-            cur.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
-            active_chats = cur.fetchone()[0]
+            local_cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
+            active_chats = local_cursor.fetchone()[0]
 
         return add_cors(jsonify({
             "status": "success", 
@@ -1220,37 +1292,37 @@ def api_toggle_ai():
 
     try:
         current_time = time.time()
-        with conn.cursor() as cur:
-            cur.execute("SELECT ai_enabled, owner_id FROM chats_v2 WHERE chat_id = %s", (chat_id_int,))
-            chat_row = cur.fetchone()
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute("SELECT ai_enabled, owner_id FROM chats_v2 WHERE chat_id = %s", (chat_id_int,))
+            chat_row = local_cursor.fetchone()
             
             if not chat_row or chat_row[1] != owner_id:
                 return add_cors(jsonify({"status": "error", "error": "Чат не найден или вы не владелец"})), 403
 
             current_ai_status = chat_row[0]
             if not current_ai_status:
-                cur.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
-                sub_row = cur.fetchone()
+                local_cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
+                sub_row = local_cursor.fetchone()
                 if not sub_row or sub_row[0] < current_time:
-                    return add_cors(jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})), 400
+
+
+return add_cors(jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})), 400
                     
                 max_slots = sub_row[1]
-                cur.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
-                active_chats_count = cur.fetchone()[0]
+                local_cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
+                active_chats_count = local_cursor.fetchone()[0]
                 if active_chats_count >= max_slots:
                     return add_cors(jsonify({"status": "error", "error": f"Лимит исчерпан ({active_chats_count}/{max_slots} чатов). Купите дополнительный пакет."})), 400
 
             new_ai_status = not current_ai_status
-            cur.execute("UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s", (new_ai_status, chat_id_int))
-            conn.commit()
+            local_cursor.execute("UPDATE chats_v2 SET ai_enabled = %s WHERE chat_id = %s", (new_ai_status, chat_id_int))
+            local_conn.commit()
             
         return add_cors(jsonify({"status": "success", "ai_enabled": new_ai_status}))
 
     except Exception as e:
-        conn.rollback()
         print(f"Критическая ошибка в /api/toggle_ai: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
-
 
 @app.route('/api/create_stars_invoice', methods=['POST', 'OPTIONS'])
 @api_rate_limit(limit=60, per=60)
@@ -1292,10 +1364,10 @@ def api_chat_details():
 
     try:
         chat_id_int = int(chat_id)
-        with conn.cursor() as cur:
+        with get_db() as (local_conn, local_cursor):
             # 1. Получаем информацию о чате
-            cur.execute("SELECT chat_title, premium_until, added_at, ai_enabled FROM chats_v2 WHERE chat_id = %s AND owner_id = %s", (chat_id_int, owner_id))
-            chat_row = cur.fetchone()
+            local_cursor.execute("SELECT chat_title, premium_until, added_at, ai_enabled FROM chats_v2 WHERE chat_id = %s AND owner_id = %s", (chat_id_int, owner_id))
+            chat_row = local_cursor.fetchone()
             
             if not chat_row:
                 return add_cors(jsonify({"status": "error", "error": "Доступ запрещен или чат не найден"})), 403
@@ -1303,14 +1375,14 @@ def api_chat_details():
             chat_title, premium_until, added_at, ai_enabled = chat_row
             
             # 2. Получаем последние 20 действий бота в этом чате
-            cur.execute("""
+            local_cursor.execute("""
                 SELECT user_name, reason, action_type, created_at 
                 FROM moderation_logs 
                 WHERE chat_id = %s 
                 ORDER BY created_at DESC 
                 LIMIT 20
             """, (chat_id_int,))
-            logs_rows = cur.fetchall()
+            logs_rows = local_cursor.fetchall()
 
         # Формируем список логов
         logs = []
@@ -1324,7 +1396,9 @@ def api_chat_details():
 
         current_time = time.time()
         is_premium = bool(premium_until and premium_until > current_time)
-        added_date_str = added_at.strftime('%d.%m.%Y') if added_at else "Нет данных"
+
+
+added_date_str = added_at.strftime('%d.%m.%Y') if added_at else "Нет данных"
 
         return add_cors(jsonify({
             "status": "success",
@@ -1339,26 +1413,20 @@ def api_chat_details():
         print(f"Ошибка в /api/chat_details: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
-
-
-from waitress import serve
-
 def run_web():
     port = int(os.environ.get("PORT", 10000))
     # Запускаем продакшен-сервер вместо встроенного Flask (app.run)
     serve(app, host="0.0.0.0", port=port)
 
-
-
 async def main():
-    import threading
     # Запускаем веб-сервер (Waitress) в отдельном потоке
     threading.Thread(target=run_web, daemon=True).start()
     
     # Запускаем фоновую задачу очистки старых логов
     asyncio.create_task(cleanup_old_logs())
     
-    print("Бот запущен и готов к работе!")
+    print("🚀 Бот запущен и работает на Enterprise-архитектуре (Пул соединений)!", flush=True)
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
