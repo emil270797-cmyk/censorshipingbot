@@ -1304,9 +1304,7 @@ def api_toggle_ai():
                 local_cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (owner_id,))
                 sub_row = local_cursor.fetchone()
                 if not sub_row or sub_row[0] < current_time:
-
-
-return add_cors(jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})), 400
+                    return add_cors(jsonify({"status": "error", "error": "Сначала активируйте PRO-подписку (пакет на 3 чата)"})), 400
                     
                 max_slots = sub_row[1]
                 local_cursor.execute("SELECT COUNT(*) FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE", (owner_id,))
