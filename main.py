@@ -865,6 +865,56 @@ async def cmd_give_pro(message: Message):
     except Exception as e:
         await message.answer(f"❌ Ошибка базы данных: {e}")
 
+@dp.message(Command("checkpay"))
+async def cmd_checkpay(m: Message):
+    if m.from_user.id != MY_ADMIN_ID: 
+        return
+        
+    args = m.text.split()
+    if len(args) != 2:
+        await m.answer("⚠️ Укажите ID пользователя: `/checkpay 123456789`", parse_mode="Markdown")
+        return
+        
+    try:
+        target_id = int(args[1])
+        with get_db() as (local_conn, local_cursor):
+            # Проверяем подписку
+            local_cursor.execute("SELECT premium_until, slots FROM user_subscriptions WHERE owner_id = %s", (target_id,))
+            sub = local_cursor.fetchone()
+            
+            # Проверяем последние 5 платежей
+            local_cursor.execute("""
+                SELECT amount, currency, telegram_payment_charge_id, created_at 
+                FROM payments 
+                WHERE user_id = %s 
+                ORDER BY created_at DESC LIMIT 5
+            """, (target_id,))
+            pays = local_cursor.fetchall()
+            
+        # Формируем ответ
+        text = f"👤 <b>Пользователь:</b> {target_id}\n\n"
+        
+        if sub:
+            until_date = datetime.fromtimestamp(sub[0]).strftime('%d.%m.%Y %H:%M') if sub[0] > 0 else "Нет"
+            text += f"🌟 <b>PRO-статус:</b> до {until_date}\n"
+            text += f"📦 <b>Слоты:</b> {sub[1]}\n\n"
+        else:
+            text += "🌟 <b>PRO-статус:</b> Записей нет\n\n"
+            
+        text += "💳 <b>Последние платежи:</b>\n"
+        if pays:
+            for p in pays:
+                date_str = p[3].strftime('%d.%m %H:%M')
+                text += f"• {p[0]} {p[1]} ({date_str})\n  Чек: {p[2]}\n"
+        else:
+            text += "Платежей не найдено."
+            
+        await m.answer(text, parse_mode="HTML")
+    except ValueError:
+        await m.answer("❌ Ошибка: ID должен быть числом.")
+    except Exception as e:
+        await m.answer(f"❌ Ошибка БД: {e}")
+
 @dp.message(Command("give_premium"))
 async def cmd_give_premium(m: Message):
     if m.from_user.id != OWNER_ID: return
@@ -1297,6 +1347,39 @@ def api_get_chats():
         print(f"Ошибка БД в /api/get_chats: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
+@app.route('/api/admin/all_chats', methods=['GET', 'OPTIONS'])
+@api_rate_limit(limit=60, per=60)
+@telegram_auth_required
+def api_admin_all_chats():
+    if request.method == 'OPTIONS': return add_cors(jsonify({'status': 'ok'}))
+    owner_id = request.verified_user_id
+    
+    # Жесткая проверка: пускаем только вас
+    if owner_id != MY_ADMIN_ID:
+        return add_cors(jsonify({"status": "error", "error": "Доступ запрещен"})), 403
+        
+    try:
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute('''
+                SELECT c.chat_id, c.chat_title, c.ai_enabled, COALESCE(s.ai_requests, 0)
+                FROM chats_v2 c
+                LEFT JOIN stats s ON c.chat_id = s.chat_id
+                ORDER BY COALESCE(s.ai_requests, 0) DESC
+                LIMIT 50
+            ''')
+            rows = local_cursor.fetchall()
+            
+        chats_list = [{
+            "chat_id": str(r[0]), 
+            "chat_title": r[1] or "Без названия", 
+            "ai_enabled": bool(r[2]),
+            "ai_requests": r[3]
+        } for r in rows]
+        
+        return add_cors(jsonify({"status": "success", "chats": chats_list}))
+    except Exception as e:
+        return add_cors(jsonify({"status": "error", "error": str(e)})), 500
+
 
 @app.route('/api/get_user_sub', methods=['GET', 'OPTIONS'])
 @api_rate_limit(limit=60, per=60)
@@ -1329,7 +1412,8 @@ def api_get_user_sub():
             "is_active": is_active, 
             "expires_at": expires_at, 
             "max_slots": max_slots, 
-            "active_chats": active_chats
+            "active_chats": active_chats,
+            "is_admin": owner_id == MY_ADMIN_ID
         }))
     except Exception as e:
         print(f"Ошибка БД в /api/get_user_sub: {e}", flush=True)
