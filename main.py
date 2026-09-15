@@ -28,6 +28,12 @@ from aiogram.types import (
 TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
+# Инициализация и запуск Gemini
+import google.generativeai as genai
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
+chat_session = model.start_chat(history=[])
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 flood_cache = {} # Словарь для отслеживания активности пользователей
