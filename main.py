@@ -32,7 +32,29 @@ dp = Dispatcher()
 
 # --- 2. БАЗА ДАННЫХ ---
 DB_URL = os.environ.get("DATABASE_URL")
-conn = psycopg2.connect(DB_URL)
+
+import psycopg2
+from psycopg2 import pool
+from contextlib import contextmanager
+import os
+
+# 1. Создаем пул на 20 одновременных подключений
+db_pool = psycopg2.pool.ThreadedConnectionPool(
+    minconn=1,
+    maxconn=20,
+    dsn=os.environ.get("DATABASE_URL")
+)
+
+# 2. Создаем удобный "менеджер контекста" для получения курсора
+@contextmanager
+def get_db():
+    """Выдает соединение из пула и возвращает его обратно после использования."""
+    conn = db_pool.getconn()
+    try:
+        yield conn, conn.cursor()
+    finally:
+        db_pool.putconn(conn)
+
 conn.autocommit = True
 cursor = conn.cursor()
 
@@ -192,49 +214,42 @@ def set_ai(chat_id, status, days=30):
     cursor.execute('UPDATE chats_v2 SET ai_enabled = %s, premium_until = %s WHERE chat_id = %s', (status, until, chat_id))
 
 def is_ai(chat_id):
-    """
-    Проверяет, включен ли ИИ, активна ли подписка владельца и не превышен ли суточный лимит (1000 запросов).
-    """
-    DAILY_AI_LIMIT = 1000 # Лимит проверок в сутки на один чат
+    DAILY_AI_LIMIT = 1000
 
-    cursor.execute('''
-        SELECT c.ai_enabled, u.premium_until, c.ai_requests_today, c.last_request_date
-        FROM chats_v2 c
-        LEFT JOIN user_subscriptions u ON c.owner_id = u.owner_id
-        WHERE c.chat_id = %s
-    ''', (chat_id,))
-    res = cursor.fetchone()
-    
-    if res and res[0]:  # Если тумблер включен
-        premium_until = res[1] or 0
-        requests_today = res[2] or 0
-        last_date = res[3]
+    # Берем свободный курсор из пула
+    with get_db() as (local_conn, local_cursor):
+        local_cursor.execute('''
+            SELECT c.ai_enabled, u.premium_until, c.ai_requests_today, c.last_request_date
+            FROM chats_v2 c
+            LEFT JOIN user_subscriptions u ON c.owner_id = u.owner_id
+            WHERE c.chat_id = %s
+        ''', (chat_id,))
+        res = local_cursor.fetchone()
+        
+        if res and res[0]:
+            premium_until = res[1] or 0
+            requests_today = res[2] or 0
+            last_date = res[3]
+            current_date = datetime.now().date()
 
-        current_date = datetime.now().date()
+            if datetime.now().timestamp() > premium_until:
+                local_cursor.execute('UPDATE chats_v2 SET ai_enabled = FALSE WHERE chat_id = %s', (chat_id,))
+                local_conn.commit()
+                return False
 
-        # 1. Проверяем, не закончилась ли подписка владельца
-        if datetime.now().timestamp() > premium_until:
-            cursor.execute('UPDATE chats_v2 SET ai_enabled = FALSE WHERE chat_id = %s', (chat_id,))
-            conn.commit()
-            return False
+            if last_date != current_date:
+                requests_today = 0
+                local_cursor.execute('UPDATE chats_v2 SET ai_requests_today = 0, last_request_date = CURRENT_DATE WHERE chat_id = %s', (chat_id,))
+                local_conn.commit()
 
-        # 2. Проверяем и сбрасываем суточный счетчик, если наступил новый день
-        if last_date != current_date:
-            requests_today = 0
-            cursor.execute('UPDATE chats_v2 SET ai_requests_today = 0, last_request_date = CURRENT_DATE WHERE chat_id = %s', (chat_id,))
-            conn.commit()
+            if requests_today >= DAILY_AI_LIMIT:
+                return False
+                
+            local_cursor.execute('UPDATE chats_v2 SET ai_requests_today = ai_requests_today + 1 WHERE chat_id = %s', (chat_id,))
+            local_conn.commit()
+            return True
 
-        # 3. Проверяем лимит
-        if requests_today >= DAILY_AI_LIMIT:
-            # Лимит исчерпан. Бот молча вернет False и проверит сообщение обычным словарем (бесплатно)
-            return False
-            
-        # 4. Если всё ок, плюсуем счетчик на 1 и разрешаем доступ к Gemini
-        cursor.execute('UPDATE chats_v2 SET ai_requests_today = ai_requests_today + 1 WHERE chat_id = %s', (chat_id,))
-        conn.commit()
-        return True
-
-    return False
+        return False
 
 
 
