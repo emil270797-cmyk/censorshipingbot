@@ -31,12 +31,25 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 # Инициализация и запуск Gemini
 import google.generativeai as genai
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-pro')
+
+# --- УЗНАЕМ ДОСТУПНЫЕ МОДЕЛИ ---
+print("=== ДОСТУПНЫЕ МОДЕЛИ GEMINI ===", flush=True)
+try:
+    for m in genai.list_models():
+        if 'generateContent' in m.supported_generation_methods:
+            print(m.name, flush=True)
+except Exception as e:
+    print(f"Ошибка получения списка: {e}", flush=True)
+print("===============================", flush=True)
+
+# Пока ставим любое название, чтобы код прошел дальше
+model = genai.GenerativeModel('gemini-1.5-flash')
 chat_session = model.start_chat(history=[])
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 flood_cache = {} # Словарь для отслеживания активности пользователей
+
 
 # --- 2. БАЗА ДАННЫХ И ПУЛ СОЕДИНЕНИЙ ---
 DB_URL = os.environ.get("DATABASE_URL")
