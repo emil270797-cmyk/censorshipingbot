@@ -623,22 +623,48 @@ async def send_report(m: Message):
 
     total_bans = sum([row[1] for row in stats])
     
+    # --- СЛОВАРИ ПЕРЕВОДА ДЛЯ ОТЧЕТА ---
+    reason_tr = {
+        "spam": "Спам / Реклама",
+        "toxic": "Токсичность / Оскорбления",
+        "obscene": "Ненормативная лексика",
+        "obscene_basic": "Мат (словарный фильтр)",
+        "obscene (словарный фильтр)": "Мат (словарный фильтр)"
+    }
+    
+    action_tr = {
+        "deleted": "Удалено",
+        "muted": "Выдан мут",
+        "warn_1": "Предупреждение (1/3)",
+        "warn_2": "Мут 5 минут (2/3)",
+        "warn_3": "Мут 1 час (3/3)"
+    }
+    # ------------------------------------
+
     text = f"📋 **Отчет модерации для этого чата**\n\n"
     text += f"🛡 Всего отражено угроз: **{total_bans}**\n"
     
+    # Переводим сгруппированную статистику
     for row in stats:
-        reason_name = row[0]
+        raw_reason = row[0]
         count = row[1]
-        text += f"├ {reason_name}: {count}\n"
+        ru_reason = reason_tr.get(raw_reason, raw_reason) # Если перевода нет, оставит как есть
+        text += f"├ {ru_reason}: {count}\n"
         
     text += "\n👤 **Последние нарушители:**\n"
+    # Переводим последние действия
     for log in recent_logs:
-        user, action, reason = log
-        text += f"• `{user}` — {action} *(причина: {reason})*\n"
+        user, raw_action, raw_reason = log
+        
+        ru_action = action_tr.get(raw_action, raw_action)
+        ru_reason = reason_tr.get(raw_reason, raw_reason)
+        
+        text += f"• `{user}` — {ru_action} *(причина: {ru_reason})*\n"
         
     text += "\n💡 *Ваш чат под защитой нейросети.*"
     
     await m.answer(text, parse_mode="Markdown")
+
 
 @dp.message(Command("status"), F.chat.type.in_({"group", "supergroup"}))
 async def chat_status(m: Message):
