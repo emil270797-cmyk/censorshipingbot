@@ -646,10 +646,9 @@ async def cmd_unwarn(m: Message):
 @dp.message(Command("unmute"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_unmute(m: Message):
     admins = await m.chat.get_administrators()
-    if m.from_user.id not
-
-
-[admin.user.id for admin in admins]:
+    if m.from_user.id not in [
+        admin.user.id for admin in admins
+    ]:
         await m.answer("❌ Эта команда доступна только администраторам.")
         return
 
