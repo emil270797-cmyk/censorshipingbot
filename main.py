@@ -1394,9 +1394,7 @@ def api_chat_details():
 
         current_time = time.time()
         is_premium = bool(premium_until and premium_until > current_time)
-
-
-added_date_str = added_at.strftime('%d.%m.%Y') if added_at else "Нет данных"
+        added_date_str = added_at.strftime('%d.%m.%Y') if added_at else "Нет данных"
 
         return add_cors(jsonify({
             "status": "success",
