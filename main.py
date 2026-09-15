@@ -387,27 +387,38 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
         print(f"⚠️ Ошибка Gemini | chat_id: {chat_id} | message_id: {message_id} | Error: {e}", flush=True)
         return "error"
 
-@dp.message(F.chat.type.in_({"group", "supergroup"}), F.text)
+# Фильтр ~F.text.startswith('/') заставит эту функцию вообще не ловить команды
+@dp.message(F.chat.type.in_({"group", "supergroup"}), F.text, ~F.text.startswith('/'))
 async def handle_group_messages(m: Message):
-    if m.text.startswith('/'):
-        return #
-    
+    # 1. ИММУНИТЕТ ДЛЯ АДМИНОВ И КАНАЛОВ
+    if m.sender_chat:
+        # Если пишут от имени канала или анонимного админа — пропускаем
+        return
+
+    if m.from_user:
+        try:
+            member = await bot.get_chat_member(m.chat.id, m.from_user.id)
+            if member.status in ['creator', 'administrator']:
+                return 
+        except:
+            pass
+
     user_id = m.from_user.id
     chat_id = m.chat.id
     current_time = time.time()
     
-    # === 1. RATE LIMITING (АНТИ-ФЛУД С ПРИВЯЗКОЙ К ЧАТУ) ===
-    cache_key = (chat_id, user_id) # Ключ теперь уникален для парой (чат + юзер)
+    # 2. АНТИ-ФЛУД С ПРИВЯЗКОЙ К ЧАТУ
+    cache_key = (chat_id, user_id)
     
     if cache_key in flood_cache:
         last_time, msg_count = flood_cache[cache_key]
-        if current_time - last_time < 2:  # Если прошло меньше 2 секунд
-            if msg_count >= 3:            # И отправлено больше 3 сообщений
+        if current_time - last_time < 2:
+            if msg_count >= 3:
                 try:
-                    await m.delete()      # Молча удаляем флуд
+                    await m.delete()
                 except:
                     pass
-                return                    # ПРЕРЫВАЕМ обработку
+                return
             else:
                 flood_cache[cache_key] = (last_time, msg_count + 1)
         else:
@@ -415,38 +426,39 @@ async def handle_group_messages(m: Message):
     else:
         flood_cache[cache_key] = (current_time, 1)
 
-    # === 2. ПРОВЕРКА СООБЩЕНИЯ (МОДЕРАЦИЯ) ===
-    reason = None
+    # 3. ПРОВЕРКА СООБЩЕНИЯ (МОДЕРАЦИЯ)
+    reason_eng = None
     
-    # Сначала проверяем, включен ли ИИ и есть ли лимиты
     if is_ai(chat_id):
-        # Отправляем в Gemini
         ai_result = await ai_filter(m.text, m.from_user.full_name, chat_id, m.message_id)
-        
         if ai_result in ["spam", "toxic", "obscene"]:
-            reason = ai_result
+            reason_eng = ai_result
         elif ai_result == "error":
-            # Если Gemini упал (например, лимиты Google), используем базовый фильтр как запасной
             if basic_filter(m.text):
-                reason = "obscene (словарный фильтр)"
+                reason_eng = "obscene_basic"
     else:
-        # Если ИИ выключен, проверяем только по нашему словарю
         if basic_filter(m.text):
-            reason = "obscene (словарный фильтр)"
+            reason_eng = "obscene_basic"
 
-    # === 3. НАКАЗАНИЕ И ЗАПИСЬ ЛОГОВ ===
-    if reason:
-        # Удаляем плохое сообщение
+    # 4. ПЕРЕВОД, НАКАЗАНИЕ И ЗАПИСЬ ЛОГОВ
+    if reason_eng:
+        # Словарь для перевода причин на русский язык
+        translations = {
+            "spam": "Спам / Реклама",
+            "toxic": "Токсичность / Оскорбления",
+            "obscene": "Ненормативная лексика",
+            "obscene_basic": "Ненормативная лексика (словарный фильтр)"
+        }
+        ru_reason = translations.get(reason_eng, reason_eng)
+
         try:
             await m.delete()
         except:
-            pass # Бот может не иметь прав на удаление
+            pass 
             
-        # Добавляем предупреждение пользователю (функция add_warn уже использует get_db)
         warns = add_warn(user_id, chat_id)
         action_taken = "deleted"
         
-        # Если это третье нарушение — выдаем мут на 1 час
         if warns >= 3:
             try:
                 until_date = int(time.time()) + 3600
@@ -457,36 +469,34 @@ async def handle_group_messages(m: Message):
                     until_date=until_date
                 )
                 action_taken = "muted"
-                reset_warns(user_id, chat_id) # Сбрасываем варны после мута
+                reset_warns(user_id, chat_id)
             except Exception as e:
                 print(f"Не удалось выдать мут: {e}")
 
-        # ЗАПИСЬ В ЛОГИ БД (Используем наш новый пул соединений!)
         try:
             with get_db() as (local_conn, local_cursor):
                 local_cursor.execute("""
                     INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type)
                     VALUES (%s, %s, %s, %s, %s)
-                """, (chat_id, user_id, m.from_user.full_name, reason, action_taken))
+                """, (chat_id, user_id, m.from_user.full_name, reason_eng, action_taken))
                 local_conn.commit()
         except Exception as e:
             print(f"Ошибка записи лога: {e}")
             
-        # Обновляем статистику (функция record_stat тоже использует get_db)
         record_stat(chat_id, "delete" if action_taken == "deleted" else "mute")
 
-        # Отправляем сервисное сообщение в чат
+        # Вывод переведенной причины в чат
         if action_taken == "muted":
-            msg = await m.answer(f"🚫 Пользователь <b>{m.from_user.full_name}</b> получил мут на 1 час.\nПричина: {reason}.", parse_mode="HTML")
+            msg = await m.answer(f"🚫 Пользователь <b>{m.from_user.full_name}</b> получил мут на 1 час.\nПричина: {ru_reason}.", parse_mode="HTML")
         else:
-            msg = await m.answer(f"⚠️ Сообщение от <b>{m.from_user.full_name}</b> удалено.\nПричина: {reason}. Предупреждение {warns}/3.", parse_mode="HTML")
+            msg = await m.answer(f"⚠️ Сообщение от <b>{m.from_user.full_name}</b> удалено.\nПричина: {ru_reason}. Предупреждение {warns}/3.", parse_mode="HTML")
             
-        # Удаляем сервисное сообщение через 5 секунд, чтобы не засорять чат
         await asyncio.sleep(5)
         try:
             await msg.delete()
         except:
             pass
+
 
 
 # --- 5. КОМАНДЫ ПОЛЬЗОВАТЕЛЕЙ И АДМИНОВ ---
