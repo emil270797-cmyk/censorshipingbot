@@ -649,13 +649,6 @@ async def chat_status(m: Message):
             f"💡 Чтобы включить ИИ-модерацию, используйте Личный Кабинет",
             parse_mode="HTML"
         )
-    else:
-        await m.answer(
-            f"🌑 <b>Статус чата:</b> Базовый\n"
-            f"🤖 <b>Фильтр:</b> Стандартный словарный\n"
-            f"💡 Чтобы включить ИИ-модерацию, используйте Личный Кабинет",
-            parse_mode="HTML"
-        )
 
 @dp.message(Command("unwarn"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_unwarn(m: Message):
