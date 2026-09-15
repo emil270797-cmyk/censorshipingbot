@@ -31,7 +31,7 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 # Инициализация и запуск Gemini
 import google.generativeai as genai
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-pro')
 chat_session = model.start_chat(history=[])
 
 bot = Bot(token=TOKEN)
