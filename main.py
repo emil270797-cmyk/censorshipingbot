@@ -332,6 +332,13 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
     Отправляет текст в Gemini.
     Возвращает строку: "ok", "spam", "toxic", "obscene" или "error".
     """
+    # === ЗАЩИТА ОТ РАЗДУВАНИЯ ТОКЕНОВ ===
+    if not text:
+        return "safe"
+        
+    # Обрезаем сообщение до 2000 символов (этого более чем достаточно для чата)
+    safe_text = text[:2000]
+    # ====================================
     try:
         # ОБЕЗЛИЧЕННЫЙ ЛОГ ЗАПРОСА
         print(f"🧠 AI moderation request | chat_id: {chat_id} | message_id: {message_id}", flush=True)
