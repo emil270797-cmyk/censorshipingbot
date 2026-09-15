@@ -293,25 +293,37 @@
                         return;
                     }
 
-                    data.logs.forEach(log => {
+                                        data.logs.forEach(log => {
                         const item = document.createElement('div');
                         item.className = 'log-item';
                         
+                        // 1. ПЕРЕВОД ДЕЙСТВИЙ (action)
                         let actionFormatted = log.action;
-                        if (actionFormatted.includes('warn_1')) actionFormatted = 'Предупреждение (1/3)';
-                        if (actionFormatted.includes('warn_2')) actionFormatted = 'Мут 5 минут (2/3)';
-                        if (actionFormatted.includes('warn_3')) actionFormatted = 'Мут 1 час (3/3)';
+                        if (actionFormatted === 'deleted') actionFormatted = 'Удалено сообщение';
+                        else if (actionFormatted === 'muted') actionFormatted = 'Выдан мут';
+                        else if (actionFormatted.includes('warn_1')) actionFormatted = 'Предупреждение (1/3)';
+                        else if (actionFormatted.includes('warn_2')) actionFormatted = 'Мут 5 минут (2/3)';
+                        else if (actionFormatted.includes('warn_3')) actionFormatted = 'Мут 1 час (3/3)';
 
+                        // 2. ПЕРЕВОД ПРИЧИН (reason)
+                        let reasonFormatted = log.reason;
+                        if (reasonFormatted === 'spam') reasonFormatted = 'Спам / Реклама';
+                        else if (reasonFormatted === 'toxic') reasonFormatted = 'Токсичность / Оскорбления';
+                        else if (reasonFormatted === 'obscene') reasonFormatted = 'Ненормативная лексика';
+                        else if (reasonFormatted === 'obscene_basic' || reasonFormatted === 'obscene (словарный фильтр)') reasonFormatted = 'Мат (словарный фильтр)';
+
+                        // 3. ОТРИСОВКА
                         item.innerHTML = `
                             <div class="log-header">
                                 <span>👤 ${log.user_name}</span>
                                 <span class="log-date">${log.date}</span>
                             </div>
                             <div style="font-size: 13px;"><b>Действие:</b> ${actionFormatted}</div>
-                            <div class="log-reason"><b>Причина:</b> ${log.reason}</div>
+                            <div class="log-reason"><b>Причина:</b> ${reasonFormatted}</div>
                         `;
                         logsContainer.appendChild(item);
                     });
+
                 } else {
                     tg.showAlert('Ошибка: ' + data.error);
                     showMainView();
