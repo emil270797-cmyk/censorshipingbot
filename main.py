@@ -1150,7 +1150,7 @@ def validate_telegram_data(init_data: str, bot_token: str):
 
 # 🔒 Декоратор, который не пустит запрос без правильной подписи
 def telegram_auth_required(f):
-    f
+    @wraps(f)
     def decorated_function(*args, **kwargs):
         if request.method == 'OPTIONS':
             return add_cors(jsonify({'status': 'ok'}))
@@ -1170,6 +1170,7 @@ def telegram_auth_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+
 # Словарь для хранения истории API запросов: {ip_address: [timestamp1, timestamp2, ...]}
 api_request_history = {}
 
@@ -1178,7 +1179,7 @@ def api_rate_limit(limit=60, per=60):
     Блокирует IP-адрес, если он делает больше 'limit' запросов за 'per' секунд.
     """
     def decorator(f):
-        f
+        @wraps(f)
         def wrapped(*args, **kwargs):
             # Для служебных OPTIONS (CORS) запросов лимит не нужен
             if request.method == 'OPTIONS':
@@ -1212,9 +1213,11 @@ def api_rate_limit(limit=60, per=60):
         return wrapped
     return decorator
 
+
 @app.route('/')
 def home():
     return "Бот-модератор работает!"
+
 
 @app.route('/api/get_chats', methods=['GET', 'OPTIONS'])
 @api_rate_limit(limit=60, per=60)
@@ -1234,6 +1237,7 @@ def api_get_chats():
     except Exception as e:
         print(f"Ошибка БД в /api/get_chats: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
+
 
 @app.route('/api/get_user_sub', methods=['GET', 'OPTIONS'])
 @api_rate_limit(limit=60, per=60)
@@ -1271,6 +1275,7 @@ def api_get_user_sub():
     except Exception as e:
         print(f"Ошибка БД в /api/get_user_sub: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
+
 
 @app.route('/api/toggle_ai', methods=['POST', 'OPTIONS'])
 @api_rate_limit(limit=60, per=60)
@@ -1322,6 +1327,7 @@ def api_toggle_ai():
         print(f"Критическая ошибка в /api/toggle_ai: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
+
 @app.route('/api/create_stars_invoice', methods=['POST', 'OPTIONS'])
 @api_rate_limit(limit=60, per=60)
 @telegram_auth_required
@@ -1348,6 +1354,7 @@ def api_create_stars_invoice():
     except Exception as e:
         print(f"Ошибка выписки счета Stars: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
+
 
 @app.route('/api/chat_details', methods=['GET', 'OPTIONS'])
 @api_rate_limit(limit=60, per=60)
@@ -1409,10 +1416,11 @@ def api_chat_details():
         print(f"Ошибка в /api/chat_details: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
 
+
 def run_web():
     port = int(os.environ.get("PORT", 10000))
-    # Запускаем продакшен-сервер вместо встроенного Flask (app.run)
     serve(app, host="0.0.0.0", port=port)
+
 
 async def main():
     # Запускаем веб-сервер (Waitress) в отдельном потоке
@@ -1425,6 +1433,8 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
+
 if __name__ == "__main__":
     asyncio.run(main())
+
 
