@@ -433,20 +433,21 @@ async def handle_group_messages(m: Message):
     else:
         flood_cache[cache_key] = (current_time, 1)
 
-    # 3. ПРОВЕРКА СООБЩЕНИЯ (МОДЕРАЦИЯ)
+        # 3. ПРОВЕРКА СООБЩЕНИЯ (МОДЕРАЦИЯ)
     reason_eng = None
     
+    # Сначала проверяем быстрым бесплатным словарем
     if basic_filter(m.text):
         reason_eng = "obscene_basic"
-    elif is_ai(chat_id):
-        ai_result = None  # 🛡 Заранее создаем пустую переменную-предохранитель
         
-        if len(m.text) > 3:
-            record_stat(chat_id, 'ai')
-            ai_result = await ai_filter(m.text, m.from_user.full_name, chat_id, m.message_id)
-            
+    # Если словарь чист, отдаем ИИ всё подряд (без ограничений по длине)
+    elif is_ai(chat_id):
+        record_stat(chat_id, 'ai') # Записываем вызов в статистику
+        ai_result = await ai_filter(m.text, m.from_user.full_name, chat_id, m.message_id)
+        
         if ai_result in ["spam", "toxic", "obscene"]:
             reason_eng = ai_result
+
         
     # 4. ПЕРЕВОД, НАКАЗАНИЕ И ЗАПИСЬ ЛОГОВ
     if reason_eng:
