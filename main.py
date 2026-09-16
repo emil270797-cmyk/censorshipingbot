@@ -438,7 +438,7 @@ async def handle_group_messages(m: Message):
 
     # 3.1 Сначала ВСЕГДА прогоняем через бесплатный словарный фильтр
     if basic_filter(m.text):
-        reason_eng = "obscene_basic'
+        reason_eng = "obscene_basic"
 
     # 3.2 Если словарь ничего не нашёл, а ИИ включен
     elif is_ai(chat_id):
