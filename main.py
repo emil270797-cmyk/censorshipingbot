@@ -1142,47 +1142,6 @@ async def punish(m: Message, reason: str):
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}", flush=True)
 
-
-
-
-    # Передаем ID и актуальное название чата (функция add_chat уже безопасна)
-    add_chat(m.chat.id, m.chat.title or "Без названия")
-    text = m.text
-
-    # 1. Иммунитет для администраторов
-    if m.from_user:
-        try:
-            member = await bot.get_chat_member(m.chat.id, m.from_user.id)
-            if member.status in ['creator', 'administrator']:
-                return 
-        except Exception:
-            pass
-
-    if is_ai(m.chat.id):
-        has_link = False
-        if m.entities:
-            for entity in m.entities:
-                if entity.type in ["url", "text_link"]:
-                    has_link = True
-                    break
-                    
-        if has_link:
-            await punish(m, "Спам/Отправка ссылок")
-            return
-            
-    if basic_filter(text):
-        await punish(m, "Мат/Запрещенное слово")
-        return
-        
-    if is_ai(m.chat.id):
-        record_stat(m.chat.id, 'ai')
-        author = m.sender_chat.title if m.sender_chat else m.from_user.first_name
-        
-        # Передаем параметры ровно так, как ожидает наша функция ai_filter
-        is_bad_str = await ai_filter(text, author, m.chat.id, m.message_id)
-        if is_bad_str in ["spam", "toxic", "obscene"]:
-            await punish(m, f"Нарушение ({is_bad_str})")
-
 def check_expiring_subscriptions():
     """Фоновая задача: проверяет подписки владельцев, которые истекают через 24 часа, и шлет уведомления в ЛС."""
     try:
