@@ -396,8 +396,7 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
 # Фильтр ~F.text.startswith('/') заставит эту функцию вообще не ловить команды
 @dp.message(F.chat.type.in_({"group", "supergroup"}), F.text, ~F.text.startswith('/'))
 async def handle_group_messages(m: Message):
-    if len(m.text) <= 3:
-        return
+    
     # 1. ИММУНИТЕТ ДЛЯ АДМИНОВ И КАНАЛОВ
     if m.sender_chat:
         # Если пишут от имени канала или анонимного админа — пропускаем
@@ -436,20 +435,22 @@ async def handle_group_messages(m: Message):
 
     # 3. ПРОВЕРКА СООБЩЕНИЯ (МОДЕРАЦИЯ)
     reason_eng = None
-    
-    if is_ai(chat_id):
-        record_stat(chat_id, 'ai')
-        
-        ai_result = await ai_filter(m.text, m.from_user.full_name, chat_id, m.message_id)
-        if ai_result in ["spam", "toxic", "obscene"]:
-            reason_eng = ai_result
-        elif ai_result == "error":
-            if basic_filter(m.text):
-                reason_eng = "obscene_basic"
-    else:
-        if basic_filter(m.text):
-            reason_eng = "obscene_basic"
 
+    # 3.1 Сначала ВСЕГДА прогоняем через бесплатный словарный фильтр
+    if basic_filter(m.text):
+        reason_eng = "obscene_basic'
+
+    # 3.2 Если словарь ничего не нашёл, а ИИ включен
+    elif is_ai(chat_id):
+        #
+        #
+        if len(m.text) > 3:
+            record_stat(chat_id, 'ai')
+            ai_result = await ai_filter(m.text, m.from_user.full_name, chat_id, m.message_id)
+        
+        if ai_result in ["spam", "toxic", "obscene"]:
+            reason_eng = ai_result  
+        
     # 4. ПЕРЕВОД, НАКАЗАНИЕ И ЗАПИСЬ ЛОГОВ
     if reason_eng:
         # Словарь для перевода причин на русский язык
