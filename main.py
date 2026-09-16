@@ -395,7 +395,9 @@ async def ai_filter(text: str, author_name: str, chat_id: int, message_id: int) 
 
 # Фильтр ~F.text.startswith('/') заставит эту функцию вообще не ловить команды
 @dp.message(F.chat.type.in_({"group", "supergroup"}), F.text, ~F.text.startswith('/'))
+@dp.edited_message(F.chat.type.in_({"group", "supergroup"}), F.text, ~F.text.startswith('/'))
 async def handle_group_messages(m: Message):
+
     
     # 1. ИММУНИТЕТ ДЛЯ АДМИНОВ И КАНАЛОВ
     if m.sender_chat:
