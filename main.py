@@ -438,6 +438,8 @@ async def handle_group_messages(m: Message):
     reason_eng = None
     
     if is_ai(chat_id):
+        record_stat(chat_id, 'ai')
+        
         ai_result = await ai_filter(m.text, m.from_user.full_name, chat_id, m.message_id)
         if ai_result in ["spam", "toxic", "obscene"]:
             reason_eng = ai_result
