@@ -134,7 +134,18 @@ def init_db():
                 slots INT DEFAULT 3
             );
         """)
-        
+
+                # Безопасное добавление новой колонки (если её еще нет)
+        try:
+            cursor.execute("""
+                ALTER TABLE moderation_logs 
+                ADD COLUMN IF NOT EXISTS message_text TEXT;
+            """)
+            conn.commit()
+        except Exception as e:
+            print(f"Ошибка при обновлении таблицы moderation_logs: {e}")
+            conn.rollback()
+
         local_conn.commit()
 
         # Безопасное добавление колонок (если они еще не существуют)
@@ -489,7 +500,7 @@ async def handle_group_messages(m: Message):
                 local_cursor.execute("""
                     INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type)
                     VALUES (%s, %s, %s, %s, %s)
-                """, (chat_id, user_id, m.from_user.full_name, reason_eng, action_taken))
+                """, (chat_id, user_id, m.from_user.full_name, reason_eng, action_taken, m.text))
                 local_conn.commit()
         except Exception as e:
             print(f"Ошибка записи лога: {e}")
@@ -1534,9 +1545,9 @@ def api_chat_details():
 
             chat_title, premium_until, added_at, ai_enabled = chat_row
             
-            # 2. Получаем последние 20 действий бота в этом чате
+            # 2. Получаем последние 20 действий бота в этом чате (добавили message_text)
             local_cursor.execute("""
-                SELECT user_name, reason, action_type, created_at 
+                SELECT user_name, reason, action_type, created_at, message_text 
                 FROM moderation_logs 
                 WHERE chat_id = %s 
                 ORDER BY created_at DESC 
@@ -1551,7 +1562,8 @@ def api_chat_details():
                 "user_name": lr[0],
                 "reason": lr[1],
                 "action": lr[2],
-                "date": lr[3].strftime('%d.%m %H:%M') if lr[3] else "Неизвестно"
+                "date": lr[3].strftime('%d.%m %H:%M') if lr[3] else "Неизвестно",
+                "message_text": lr[4] # Упаковываем текст сообщения в JSON
             })
 
         current_time = time.time()
@@ -1570,6 +1582,7 @@ def api_chat_details():
     except Exception as e:
         print(f"Ошибка в /api/chat_details: {e}", flush=True)
         return add_cors(jsonify({"status": "error", "error": "Внутренняя ошибка сервера"})), 500
+
 
 
 def run_web():
