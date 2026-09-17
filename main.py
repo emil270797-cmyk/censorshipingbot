@@ -135,16 +135,17 @@ def init_db():
             );
         """)
 
-                # Безопасное добавление новой колонки (если её еще нет)
-        try:
-            cursor.execute("""
+                    # Безопасное добавление новой колонки
+    try:
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute("""
                 ALTER TABLE moderation_logs 
                 ADD COLUMN IF NOT EXISTS message_text TEXT;
             """)
-            conn.commit()
-        except Exception as e:
-            print(f"Ошибка при обновлении таблицы moderation_logs: {e}")
-            conn.rollback()
+            local_conn.commit()
+    except Exception as e:
+        print(f"Ошибка при обновлении таблицы moderation_logs: {e}")
+
 
         local_conn.commit()
 
