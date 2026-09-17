@@ -1124,7 +1124,7 @@ async def punish(m: Message, reason: str):
         # Безопасная запись лога наказания через пул соединений
         with get_db() as (local_conn, local_cursor):
             local_cursor.execute(
-                'INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type) VALUES (%s, %s, %s, %s, %s)',
+                'INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type) VALUES (%s, %s, %s, %s, %s, %s)',
                 (m.chat.id, user_id, user_name, reason, f"warn_{warns}")
             )
             local_conn.commit() 
