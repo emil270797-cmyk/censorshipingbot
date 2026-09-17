@@ -313,12 +313,15 @@
                         else if (reasonFormatted === 'obscene_basic' || reasonFormatted === 'obscene (словарный фильтр)') reasonFormatted = 'Мат (словарный фильтр)';
 
                         // 3. ОТРИСОВКА
+                        let textPreview = log.message_text ? `<div style="font-size: 13px; color: #666; font-style: italic; margin-top: 4px; margin-bottom: 2px;">💬 "${log.message_text}"</div>` : '';
+
                         item.innerHTML = `
                             <div class="log-header">
                                 <span>👤 ${log.user_name}</span>
                                 <span class="log-date">${log.date}</span>
                             </div>
                             <div style="font-size: 13px;"><b>Действие:</b> ${actionFormatted}</div>
+                            ${textPreview}
                             <div class="log-reason"><b>Причина:</b> ${reasonFormatted}</div>
                         `;
                         logsContainer.appendChild(item);
@@ -333,6 +336,7 @@
                 showMainView();
             });
         }
+
 
         // --- ЛОГИКА ПАНЕЛИ АДМИНА ---
         function openAdminPanel() {
