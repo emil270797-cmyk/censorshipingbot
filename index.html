@@ -325,7 +325,7 @@
                         let textPreview = log.message_text ? `<div style="font-size: 13px; color: #666; font-style: italic; margin-top: 4px; margin-bottom: 2px;">💬 "${log.message_text}"</div>` : '';
 
                         // Синий никнейм
-                        let usernameStr = log.username ? ` <span style="color: var(--tg-theme-button-color, #2481cc); font-size: 13px;">@${log.usernname}<span>` : '';
+                        let usernameStr = log.username ? ` <span onclick="tg.openTelegramLink('https://t.me/${log.username}')" style="color: var(--tg-theme-button-color, #2481cc); font-size: 13px; cursor: pointer; text-decoration: none;">@${log.username}</span>` : '';
                         
                         item.innerHTML = `
                             <div class="log-header">
