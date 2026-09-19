@@ -324,9 +324,12 @@
 
                         let textPreview = log.message_text ? `<div style="font-size: 13px; color: #666; font-style: italic; margin-top: 4px; margin-bottom: 2px;">💬 "${log.message_text}"</div>` : '';
 
+                        // Синий никнейм
+                        let usernameStr = log.username ? ` <span style="color: var(--tg-theme-button-color, #2481cc); font-size: 13px;">@${log.usernname}<span>` : '';
+                        
                         item.innerHTML = `
                             <div class="log-header">
-                                <span>👤 ${log.user_name}</span>
+                                <span>👤 ${log.user_name}${usernameStr}</span>
                                 <span class="log-date">${localDateStr}</span>
                             </div>
                             <div style="font-size: 13px;"><b>Действие:</b> ${actionFormatted}</div>
