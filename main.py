@@ -114,7 +114,7 @@ def init_db():
         )''')
 
         local_cursor.execute('''CREATE TABLE IF NOT EXISTS known_users (
-            user_id BIGING PRIMARY KEY,
+            user_id BIGINT PRIMARY KEY,
             username TEXT,
             full_name TEXT
             )''')
