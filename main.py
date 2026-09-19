@@ -1610,12 +1610,13 @@ def api_chat_details():
 
             chat_title, premium_until, added_at, ai_enabled = chat_row
             
-            # 2. Получаем последние 20 действий бота в этом чате (добавили message_text)
+            # 2. Получаем последние 20 действий и присоединяем @username из справочника
             local_cursor.execute("""
-                SELECT user_name, reason, action_type, created_at, message_text 
-                FROM moderation_logs 
-                WHERE chat_id = %s 
-                ORDER BY created_at DESC 
+                SELECT m.user_name, m.reason, m.action_type, m.created_at, m.message_text, k.username 
+                FROM moderation_logs m
+                LEFT JOIN known_users k ON m.user_id = k.user_id
+                WHERE m.chat_id = %s 
+                ORDER BY m.created_at DESC 
                 LIMIT 20
             """, (chat_id_int,))
             logs_rows = local_cursor.fetchall()
@@ -1628,8 +1629,10 @@ def api_chat_details():
                 "reason": lr[1],
                 "action": lr[2],
                 "date": lr[3].strftime('%Y-%m-%dT%H:%M:%SZ') if lr[3] else None,
-                "message_text": lr[4] # Упаковываем текст сообщения в JSON
+                "message_text": lr[4],
+                "username": lr[5]  # Передаем @никнейм на фронтенд
             })
+
 
         current_time = time.time()
         is_premium = bool(premium_until and premium_until > current_time)
