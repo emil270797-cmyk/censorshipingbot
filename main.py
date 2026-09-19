@@ -114,19 +114,20 @@ def init_db():
         )''')
 
         # Гарантированное создание таблицы known_users
-try:
-    with get_db() as (local_conn, local_cursor):
-        local_cursor.execute('''
-            CREATE TABLE IF NOT EXISTS known_users (
-                user_id BIGINT PRIMARY KEY,
-                username TEXT,
-                full_name TEXT
-            )
-        ''')
-        local_conn.commit()
-        print("✅ Таблица known_users успешно проверена/создана!", flush=True)
-except Exception as e:
-    print(f"❌ Ошибка при создании known_users: {e}", flush=True)
+        try:
+            with get_db() as (local_conn, local_cursor):
+                local_cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS known_users (
+                        user_id BIGINT PRIMARY KEY,
+                        username TEXT,
+                        full_name TEXT
+                    )
+                ''')
+                local_conn.commit()
+                print("✅ Таблица known_users успешно проверена/создана!", flush=True)
+        except Exception as e:
+            print(f"❌ Ошибка при создании known_users: {e}", flush=True)
+
 
 
         # Таблица платежей Stars
