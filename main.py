@@ -1219,51 +1219,55 @@ async def punish(m: Message, reason: str):
     except Exception as e:
         print(f"Ошибка при выдаче наказания: {e}", flush=True)
 
-def check_expiring_subscriptions():
-    """Фоновая задача: проверяет подписки владельцев, которые истекают через 24 часа, и шлет уведомления в ЛС."""
-    try:
-        current_time = time.time()
-        one_day_later = current_time + 86400 # 24 часа в секундах
-        
-        # Ищем владельцев, у которых PRO истекает в диапазоне от «сейчас» до «через 24 часа»
-        with get_db() as (local_conn, local_cursor):
-            local_cursor.execute(
-                """SELECT owner_id, premium_until 
-                   FROM user_subscriptions 
-                   WHERE premium_until > %s AND premium_until <= %s""",
-                (current_time, one_day_later)
-            )
-            expiring_subs = local_cursor.fetchall()
+notified_subs = {}
+async def check_expiring_subscriptions():
+    """Фоновая задача: проверяет подписки владельцев, которые истекают через 24 часа."""
+    while True:
+            try:
+                current_time = time.time()
+                one_day_later = current_time + 86400
+                
+                with get_db() as (local_conn, local_cursor):
+                    local_cursor.execute(
+                        """SELECT owner_id, premium_until 
+                           FROM user_subscriptions 
+                           WHERE premium_until > %s AND premium_until <= %s""",
+                        (current_time, one_day_later)
+                    )
+                    expiring_subs = local_cursor.fetchall()
             
-            for sub in expiring_subs:
-                owner_id, premium_until = sub
+                    for sub in expiring_subs:
+                        owner_id, premium_until = sub
                 
-                # Находим все чаты этого владельца, чтобы перечислить их в сообщении
-                local_cursor.execute(
-                    """SELECT chat_title FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE""",
-                    (owner_id,)
-                )
-                owner_chats = local_cursor.fetchall()
-                chat_titles = ", ".join([f"«{c[0]}»" for c in owner_chats]) if owner_chats else "ваших чатов"
+                        # Защита от спама: если уже предупреждали об ЭТОМ сроке окончания, пропускаем
+                        if notified_subs.get(owner_id) == premium_until:
+                            continue
+                    
+                        local_cursor.execute(
+                            "SELECT chat_title FROM chats_v2 WHERE owner_id = %s AND ai_enabled = TRUE",
+                            (owner_id,)
+                        )
+                        owner_chats = local_cursor.fetchall()
+                        chat_titles = ", ".join([f"«{c[0]}»" for c in owner_chats]) if owner_chats else "ваших чатов"
                 
-                hours_left = int((premium_until - current_time) / 3600)
+                        hours_left = int((premium_until - current_time) / 3600)
                 
-                message_text = (
-                    f"⚠️ **Внимание!** Ваша PRO-подписка для чатов ({chat_titles}) истекает через {hours_left} ч.\n\n"
-                    f"Чтобы ИИ-модератор не отключился, продлите подписку в личном кабинете Mini App!"
-                )
+                        message_text = (
+                            f"⚠️ **Внимание!** Ваша PRO-подписка для чатов ({chat_titles}) истекает примерно через {hours_left} ч.\n\n"
+                            f"Чтобы ИИ-модератор не отключился, продлите подписку в личном кабинете!"
+                        )
                 
-                # Отправляем сообщение владельцу в ЛС
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(bot.send_message(owner_id, message_text, parse_mode="Markdown"))
-                    loop.close()
-                except Exception as send_err:
-                    print(f"Не удалось отправить уведомление пользователю {owner_id}: {send_err}")
-                
-    except Exception as e:
-        print(f"Ошибка в фоновой задаче проверки подписок: {e}")
+                        try:
+                            await bot.send_message(owner_id, message_text, parse_mode="Markdown")
+                            notified_subs[owner_id] = premium_until # Запоминаем, что уже уведомили
+                        except Exception as send_err:
+                            print(f"Не удалось отправить уведомление пользователю {owner_id}: {send_err}")
+                    
+            except Exception as e:
+                print(f"Ошибка в фоновой задаче проверки подписок: {e}")
+        
+            # Проверяем базу каждый час (3600 секунд)
+            await asyncio.sleep(3600)
 
 async def cleanup_old_logs():
     """
@@ -1664,6 +1668,7 @@ async def main():
     
     # Запускаем фоновую задачу очистки старых логов
     asyncio.create_task(cleanup_old_logs())
+    asyncio.create_task(check_expiring_subscriptionss())
     
     print("🚀 Бот запущен и работает на Enterprise-архитектуре (Пул соединений)!", flush=True)
     await bot.delete_webhook(drop_pending_updates=True)
