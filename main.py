@@ -1668,7 +1668,7 @@ async def main():
     
     # Запускаем фоновую задачу очистки старых логов
     asyncio.create_task(cleanup_old_logs())
-    asyncio.create_task(check_expiring_subscriptionss())
+    asyncio.create_task(check_expiring_subscriptions())
     
     print("🚀 Бот запущен и работает на Enterprise-архитектуре (Пул соединений)!", flush=True)
     await bot.delete_webhook(drop_pending_updates=True)
