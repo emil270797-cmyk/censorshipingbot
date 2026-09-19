@@ -436,17 +436,17 @@ async def handle_group_messages(m: Message):
 
     # Незаметно сохраняем или обновляем никнейм пользователя в базе
     if m.from_user.username:
-    try:
-        with get_db() as (local_conn, local_cursor):
-            local_cursor.execute("""
-                INSERT INTO known_users (user_id, username, full_name)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (user_id) DO UPDATE 
-                SET username = EXCLUDED.username, full_name = EXCLUDED.full_name
-            """, (user_id, m.from_user.username.lower(), m.from_user.full_name))
-            local_conn.commit()
-    except Exception as e:
-        print(f"Ошибка сохранения пользователя: {e}")
+        try:
+            with get_db() as (local_conn, local_cursor):
+                local_cursor.execute("""
+                    INSERT INTO known_users (user_id, username, full_name)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (user_id) DO UPDATE 
+                    SET username = EXCLUDED.username, full_name = EXCLUDED.full_name
+                """, (user_id, m.from_user.username.lower(), m.from_user.full_name))
+                local_conn.commit()
+        except Exception as e:
+            print(f"Ошибка сохранения пользователя: {e}")
     
     
     # 2. АНТИ-ФЛУД С ПРИВЯЗКОЙ К ЧАТУ
