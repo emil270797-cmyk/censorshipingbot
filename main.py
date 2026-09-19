@@ -1627,7 +1627,7 @@ def api_chat_details():
                 "user_name": lr[0],
                 "reason": lr[1],
                 "action": lr[2],
-                "date": lr[3].strftime('%Y-%m-%dT%H:%M:%SZ') if lr[3] else "Неизвестно",
+                "date": lr[3].strftime('%Y-%m-%dT%H:%M:%SZ') if lr[3] else None,
                 "message_text": lr[4] # Упаковываем текст сообщения в JSON
             })
 
