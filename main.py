@@ -499,7 +499,7 @@ async def handle_group_messages(m: Message):
         try:
             with get_db() as (local_conn, local_cursor):
                 local_cursor.execute("""
-                    INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type)
+                    INSERT INTO moderation_logs (chat_id, user_id, user_name, reason, action_type, message_text)
                     VALUES (%s, %s, %s, %s, %s, %s)
                 """, (chat_id, user_id, m.from_user.full_name, reason_eng, action_taken, m.text))
                 local_conn.commit()
