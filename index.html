@@ -313,19 +313,32 @@
                         else if (reasonFormatted === 'obscene_basic' || reasonFormatted === 'obscene (словарный фильтр)') reasonFormatted = 'Мат (словарный фильтр)';
 
                         // 3. ОТРИСОВКА
-                        let textPreview = log.message_text ? `<div style="font-size: 13px; color: #666; font-style: italic; margin-top: 4px; margin-bottom: 2px;">💬 "${log.message_text}"</div>` : '';
+                    let localDateStr = "Неизвестно";
+                    if (log.date) {
+                        // Телефон сам переведет время в нужный часовой пояс админа
+                        let dateObj = new Date(log.date);
+                        let dayMonth = dateObj.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+                        let time = dateObj.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+                        localDateStr = `${dayMonth} ${time}`;
+                    }
 
-                        item.innerHTML = `
-                            <div class="log-header">
-                                <span>👤 ${log.user_name}</span>
-                                <span class="log-date">${log.date}</span>
-                            </div>
-                            <div style="font-size: 13px;"><b>Действие:</b> ${actionFormatted}</div>
-                            ${textPreview}
-                            <div class="log-reason"><b>Причина:</b> ${reasonFormatted}</div>
-                        `;
-                        logsContainer.appendChild(item);
-                    });
+                    let textPreview = log.message_text ?вестно";
+                    if (log.date) {
+                        // Телефон сам переведет время в нужный часовой пояс админа
+     : '';
+
+                    item.innerHTML = `
+                        <div class="log-header">
+                            <span>👤 ${log.user_name}</span>
+                            <span class="log-date">${localDateStr}</span>
+                        </div>
+                        <div style="font-size: 13px;"><b>Действие:</b> ${actionFormatted}</div>
+                        ${textPreview}
+                        <div class="log-reason"><b>Причина:</b> ${reasonFormatted}</div>
+                    `;
+                    logsContainer.appendChild(item);
+                });
+
 
                 } else {
                     tg.showAlert('Ошибка: ' + data.error);
