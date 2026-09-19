@@ -113,6 +113,12 @@ def init_db():
             chat_id BIGINT
         )''')
 
+        local_cursor.execute('''CREATE TABLE IF NOT EXISTS known_users (
+            user_id BIGING PRIMARY KEY,
+            username TEXT,
+            full_name TEXT
+            )''')
+
         # Таблица платежей Stars
         local_cursor.execute('''
             CREATE TABLE IF NOT EXISTS payments (
@@ -427,6 +433,21 @@ async def handle_group_messages(m: Message):
     user_id = m.from_user.id
     chat_id = m.chat.id
     current_time = time.time()
+
+    # Незаметно сохраняем или обновляем никнейм пользователя в базе
+    if m.from_user.username:
+    try:
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute("""
+                INSERT INTO known_users (user_id, username, full_name)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id) DO UPDATE 
+                SET username = EXCLUDED.username, full_name = EXCLUDED.full_name
+            """, (user_id, m.from_user.username.lower(), m.from_user.full_name))
+            local_conn.commit()
+    except Exception as e:
+        print(f"Ошибка сохранения пользователя: {e}")
+    
     
     # 2. АНТИ-ФЛУД С ПРИВЯЗКОЙ К ЧАТУ
     cache_key = (chat_id, user_id)
@@ -723,33 +744,65 @@ async def cmd_unwarn(m: Message):
     if m.from_user.id not in [admin.user.id for admin in admins]:
         await m.answer("❌ Эта команда доступна только администраторам.")
         return
+    target_user_id = None
+    target_name = None
 
-    if not m.reply_to_message:
-        await m.answer("⚠️ Чтобы снять предупреждения, ответьте этой командой на сообщение пользователя.")
+    # СПОСОБ 1: Реплай на сообщение
+    if m.reply_to_message:
+        target_user_id = m.reply_to_message.from_user.id
+        target_name = m.reply_to_message.from_user.first_name
+    # СПОСОБ 2: Поиск по @username
+    elif len(m.text.split()) > 1:
+        target_username = m.text.split()[1].replace("@", "").lower()
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute("SELECT user_id, full_name FROM known_users WHERE username = %s", (target_username,))
+            row = local_cursor.fetchone()
+            if row:
+                target_user_id = row[0]
+                target_name = row[1]
+            else:
+                await m.answer(f"❌ Пользователь @{target_username} не найден в базе. Используйте реплай.")
+                return
+    else:
+        await m.answer("⚠️ Ответьте на сообщение или напишите: /unwarn @username")
         return
 
-    target_user = m.reply_to_message.from_user
     try:
-        reset_warns(target_user.id, m.chat.id) # Функция reset_warns уже безопасна
-        await m.answer(f"✅ Предупреждения пользователя <b>{target_user.first_name}</b> обнулены.", parse_mode="HTML")
+        reset_warns(target_user_id, m.chat.id)
+        await m.answer(f"✅ Предупреждения пользователя <b>{target_name}</b> обнулены.", parse_mode="HTML")
     except Exception as e:
         print(f"Ошибка при снятии варна: {e}")
 
 @dp.message(Command("unmute"), F.chat.type.in_({"group", "supergroup"}))
 async def cmd_unmute(m: Message):
     admins = await m.chat.get_administrators()
-    if m.from_user.id not in [
-        admin.user.id for admin in admins
-    ]:
+    if m.from_user.id not in [admin.user.id for admin in admins]:
         await m.answer("❌ Эта команда доступна только администраторам.")
         return
 
-    if not m.reply_to_message:
-        await m.answer("⚠️ Чтобы снять мут, ответьте этой командой на сообщение пользователя.")
+    target_user_id = None
+    target_name = None
+
+    # СПОСОБ 1: Реплай на сообщение
+    if m.reply_to_message:
+        target_user_id = m.reply_to_message.from_user.id
+        target_name = m.reply_to_message.from_user.first_name
+    # СПОСОБ 2: Поиск по @username
+    elif len(m.text.split()) > 1:
+        target_username = m.text.split()[1].replace("@", "").lower()
+        with get_db() as (local_conn, local_cursor):
+            local_cursor.execute("SELECT user_id, full_name FROM known_users WHERE username = %s", (target_username,))
+            row = local_cursor.fetchone()
+            if row:
+                target_user_id = row[0]
+                target_name = row[1]
+            else:
+                await m.answer(f"❌ Пользователь @{target_username} не найден в базе. Используйте реплай.")
+                return
+    else:
+        await m.answer("⚠️ Ответьте на сообщение или напишите: /unmute @username")
         return
-    
-    target_user = m.reply_to_message.from_user
-    
+
     try:
         permissions = ChatPermissions(
             can_send_messages=True, can_send_audios=True, can_send_documents=True,
@@ -757,9 +810,9 @@ async def cmd_unmute(m: Message):
             can_send_voice_notes=True, can_send_polls=True, can_send_other_messages=True,
             can_add_web_page_previews=True
         )
-        await bot.restrict_chat_member(chat_id=m.chat.id, user_id=target_user.id, permissions=permissions)
-        reset_warns(target_user.id, m.chat.id) # Функция reset_warns уже безопасна
-        await m.answer(f"🔊 Мут снят! <b>{target_user.first_name}</b> снова может писать сообщения.", parse_mode="HTML")
+        await bot.restrict_chat_member(chat_id=m.chat.id, user_id=target_user_id, permissions=permissions)
+        reset_warns(target_user_id, m.chat.id)
+        await m.answer(f"🔊 Мут снят! <b>{target_name}</b> снова может писать сообщения.", parse_mode="HTML")
     except Exception as e:
         await m.answer("❌ Не удалось снять мут. Возможно, этот пользователь не в муте, или у бота не хватает прав.")
         print(f"Ошибка при снятии мута: {e}")
